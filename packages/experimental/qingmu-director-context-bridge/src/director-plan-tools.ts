@@ -277,8 +277,14 @@ export function registerDirectorPlanTools(ctx: Context, ports: Ports): void {
         if (current.context.contextSnapshotSha256 !== input.context.contextSnapshotSha256) throw new Error('导演设计来源已变化，请重新读取并合并修改。')
         if (typeof args.directorPlan.generationContext === 'string' && args.directorPlan.generationContext.trim()) {
           const fullRead = toolValues(session, 'qingmu_read_reference_draft').findLast((value) => {
-            const read = value as { scope?: unknown; saved?: ReferenceVideoDraftResponse } | null
-            return read?.saved?.directorSource && read.scope && digest(read.scope) === digest(scope)
+            const read = value as { scope?: Record<string, unknown>; saved?: ReferenceVideoDraftResponse } | null
+            if (!read?.saved?.directorSource || !read.scope) return false
+            // The reference-draft tool names the shot `frameId`; the director-plan tool names it `shotId`.
+            // Match on the same project and the same shot under either spelling. A whole-scope digest can
+            // never match across the two tool contracts, which rejected every correctly-done read.
+            return read.scope.projectId === scope.projectId
+              && (read.scope.frameId === scope.shotId || read.scope.shotId === scope.shotId
+                || digest(read.scope) === digest(scope))
           }) as { saved: ReferenceVideoDraftResponse } | undefined
           if (!fullRead) throw new Error('编写本镜继承设定前，请用 qingmu_read_reference_draft 读取 saved.directorSource.prompt 中当前完整的全片、世界与资产设计；镜头设计读取和会话旧描述不能替代它。')
           const sourceRead = await ctx.qingmuYimengRead('referenceVideoDraft', { projectId: scope.projectId, frameId: scope.shotId }, exec.signal)
