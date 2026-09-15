@@ -77,12 +77,26 @@ export function createNativeDirectorSessionPort(ctx: ClientContext, connection: 
     },
     async read(sessionId, afterSeq) {
       const history = async () => {
-        const response = await connection.api.sessions.history({ sessionId: sessionId as NativeSessionId, maxMessages: 64 })
-        const value = unwrapRpc(response.result)
-        if (!value || typeof value !== 'object' || !('events' in value) || !Array.isArray(value.events)) {
-          throw new Error('编剧历史响应不完整，请读取原结果。')
+        let beforeSeq: number | undefined
+        let events: unknown[] = []
+        while (true) {
+          const response = await connection.api.sessions.history({ sessionId: sessionId as NativeSessionId,
+            maxMessages: 64, ...(beforeSeq !== undefined ? { beforeSeq } : {}) })
+          const value = unwrapRpc(response.result)
+          if (!value || typeof value !== 'object' || !('events' in value) || !Array.isArray(value.events)) {
+            throw new Error('编剧历史响应不完整，请读取原结果。')
+          }
+          events = [...value.events, ...events]
+          const draft = readStoryDraft(events, afterSeq)
+          if (draft.running || draft.finished || !('hasMore' in value) || !value.hasMore) return draft
+          // Long tool runs can push turn/start out of the latest message page.
+          const oldest = value.events[0] as { event?: { seq?: unknown } } | undefined
+          const cursor = oldest?.event?.seq
+          if (typeof cursor !== 'number' || !Number.isInteger(cursor)
+            || (beforeSeq !== undefined && cursor >= beforeSeq)) throw new Error('编剧历史分页不完整，请读取原结果。')
+          if (cursor <= afterSeq) return draft
+          beforeSeq = cursor
         }
-        return readStoryDraft(value.events, afterSeq)
       }
       const draft = await history()
       if (!draft.running) return draft

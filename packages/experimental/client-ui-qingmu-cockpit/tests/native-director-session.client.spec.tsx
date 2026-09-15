@@ -67,6 +67,31 @@ it('leaves a live writing turn running and propagates uncertain recovery without
   expect(f.api.sessions.prompt).not.toHaveBeenCalled()
 })
 
+it.each([true, false])('reads the older turn start when a long creative task is running=%s', async (running) => {
+  const f = fixture(false, 'qingmu-director')
+  let recovered = false
+  f.api.sessions.history.mockImplementation(async (input?: unknown) => {
+    const { beforeSeq } = input as { beforeSeq?: number }
+    if (beforeSeq === 100) return ok({ hasMore: false, events: [
+      { event: { seq: 5, type: 'turn/start', data: {} } },
+    ] })
+    return ok({ hasMore: true, events: [
+      { event: { seq: 100, type: 'tool/result', data: {} } },
+      ...(recovered ? [{ event: { seq: 101, type: 'turn/end', data: { reason: { kind: 'interrupted' } } } }] : []),
+    ] })
+  })
+  f.api.sessions.list.mockResolvedValue(ok({ items: [{ sessionId: 'creative-session', cwd: '/retained-project',
+    running, agentPreset: 'qingmu-director' }] }))
+  f.api.sessions.create.mockImplementation(async () => { recovered = true; return ok({}) })
+  const result = await f.port.story!.read('creative-session', 4)
+  expect(result).toMatchObject(running ? { running: true, finished: false }
+    : { running: false, finished: true, error: '编剧已停止，当前稿尚未完成。' })
+  expect(f.api.sessions.history).toHaveBeenCalledWith({ sessionId: 'creative-session', maxMessages: 64, beforeSeq: 100 })
+  expect(f.api.sessions.create).toHaveBeenCalledTimes(running ? 0 : 1)
+  expect(f.api.sessions.prompt).not.toHaveBeenCalled()
+  expect(f.sessions.open).not.toHaveBeenCalled()
+})
+
 it('does not recover an unverified writing composition or treat an unstarted queue as interrupted', async () => {
   const f = fixture(false, 'qingmu-director')
   expect(await f.port.story?.read('creative-session', 4)).toMatchObject({ running: false, finished: false })
