@@ -473,3 +473,5 @@ The batch panel chooses its initial expansion once per project/episode. Later pr
 Reusable asset designs distinguish carriers from their contents. Identity references explicitly leave pockets, holders and racks empty when they only show capacity; an authored carrying or installation state specifies its actual contents and count. The director compares character, scene and prop references for duplicate movable objects before downstream use. This is design guidance, not automatic image approval.
 
 For narrative prop text, the director quotes each exact visible string separately from layout instructions and leaves unresolved text blank instead of rendering placeholder explanations.
+
+Reference selection follows inspected pixels. A revision keeps the reliable identity source but replaces a reference that repeatedly reproduces incorrect text, quantity or structure with a clean source; a justified redesign can use an empty reference list. Reference purposes describe retained visual facts, while rejected text and repair history stay in design rationale. This guidance changes neither stored media nor approval status.
