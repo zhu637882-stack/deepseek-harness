@@ -165,9 +165,17 @@ export function ProjectAssetLibrary({ projectId, episodeId, port, refreshToken =
   }
   const filtered = items.filter(item => (kind === 'all' || item.mediaType === kind)
     && item.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+  const references = filtered.filter(item => item.source?.role === 'sound_voice_reference_excerpt')
+  const primary = filtered.filter(item => item.source?.role !== 'sound_voice_reference_excerpt')
   const preview = items.find(item => item.assetId === selected)
   const { preview: localPreview, available: privateAvailable } = usePrivateReferencePreview(projectId, preview, port, previewRetry)
   const previewUrl = preview?.browserUrl || localPreview?.url
+  const assetCard = (item: ReferenceVideoAsset) => <button type="button" key={`${item.assetId}:${item.assetSha256}`} className={css.asset}
+    aria-label={`预览${assetLabel(item)}`} aria-pressed={item.assetId === selected} onClick={() => { setSelected(item.assetId) }}>
+    <AssetThumbnail projectId={projectId} item={item} port={port} />
+    <strong>{assetLabel(item)}</strong><small>{item.mediaType === 'reference_video' ? '视频 · 点击播放'
+      : item.mediaType === 'reference_audio' ? '声音 · 点击试听' : '图片 · 点击查看'}</small>
+  </button>
   return <section className={css.library} aria-label="项目图片与音色库">
     <header className={css.toolbar}>
       <div><h2>项目素材</h2><p>人物、场景图片、音色与视频，在镜头工作台中按需引用。</p></div>
@@ -184,7 +192,7 @@ export function ProjectAssetLibrary({ projectId, episodeId, port, refreshToken =
       <input aria-label="搜索素材" placeholder="搜索素材名称" value={query} onChange={(event) => { setQuery(event.target.value) }} />
       {port.setAssetLibraryState && episodeId && <button type="button" disabled={busy || changing} aria-pressed={deleted}
         onClick={() => { setSelected(undefined); setItems([]); setNotice(''); setDeleted(value => !value) }}>{deleted ? '返回素材库' : '已删除素材'}</button>}
-      <span aria-live="polite">已载入 {items.length} 项</span>
+      <span aria-live="polite">已载入 {items.length} 项{references.length > 0 ? `（含 ${references.length} 段同源声音片段）` : ''}</span>
     </div>
     {notice && <p role="status">{notice}</p>}
     {error && <div role="alert"><p>素材暂时无法更新，请重试。</p><details><summary>错误详情</summary>{error}</details></div>}
@@ -208,13 +216,13 @@ export function ProjectAssetLibrary({ projectId, episodeId, port, refreshToken =
         <details><summary>素材标识</summary><code>{preview.assetId}</code></details>
       </section>}
       <div className={css.grid}>
-        {filtered.map(item => <button type="button" key={`${item.assetId}:${item.assetSha256}`} className={css.asset}
-          aria-label={`预览${assetLabel(item)}`} aria-pressed={item.assetId === selected} onClick={() => { setSelected(item.assetId) }}>
-          <AssetThumbnail projectId={projectId} item={item} port={port} />
-          <strong>{assetLabel(item)}</strong><small>{item.mediaType === 'reference_video' ? '视频 · 点击播放'
-            : item.mediaType === 'reference_audio' ? '音色 · 点击试听' : '图片 · 点击查看'}</small>
-        </button>)}
+        {primary.map(assetCard)}
       </div>
+      {references.length > 0 && <details>
+        <summary>视频用声音片段（{references.length}）</summary>
+        <p>这些片段从完整试听截取，供镜头引用，属于已有音色。</p>
+        <div className={css.grid}>{references.map(assetCard)}</div>
+      </details>}
       {!busy && !filtered.length && <p className={css.empty}>{items.length ? '没有找到匹配的素材。' : deleted ? '没有已删除素材。' : '项目中还没有可引用的图片或音色。选择人物或场景后，可上传图片参考；角色音色可在人物参考区上传。'}</p>}
     </div>
     {page < pages && <button type="button" disabled={busy} onClick={() => { void load(page + 1) }}>加载更多素材</button>}

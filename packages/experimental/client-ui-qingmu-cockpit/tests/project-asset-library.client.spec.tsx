@@ -31,6 +31,10 @@ it('distinguishes a full voice audition from its derived reference without chang
   render(<ProjectAssetLibrary projectId="p" port={port} />)
   fireEvent.click(await screen.findByRole('button', { name: '预览阿禾 · 完整试听' }))
   expect(screen.getByRole('region', { name: '素材预览' }).querySelector('audio')?.getAttribute('src')).toBe('/voice.wav')
+  const details = screen.getByText('视频用声音片段（1）').closest('details')!
+  expect(details.open).toBe(false)
+  expect(details.contains(screen.getByRole('button', { name: '预览阿禾 · 3秒参考片段' }))).toBe(true)
+  details.open = true
   fireEvent.click(screen.getByRole('button', { name: '预览阿禾 · 3秒参考片段' }))
   expect(screen.getByText('从同次完整试听截取，供视频引用；属于同一个音色。')).toBeTruthy()
   expect(screen.getByRole('region', { name: '素材预览' }).querySelector('audio')?.getAttribute('src')).toBe('/excerpt.wav')

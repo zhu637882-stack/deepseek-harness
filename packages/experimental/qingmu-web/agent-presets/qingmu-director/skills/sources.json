@@ -717,7 +717,7 @@
       "license": "Apache-2.0",
       "files": {
         "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
-        "SKILL.md": "410472f4c2cf8e48fb952956c8d075ea23fcfc14acbd09c4806c4570221ba872",
+        "SKILL.md": "312e8321067f7460bd95203b50e4631720cffc8b6b1c0aed132d10f843ee31e9",
         "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "a7e8d276f3c726dac65f4e8afa535e5213effee2c820c76d03130da0510a9600"
@@ -740,7 +740,7 @@
       "license": "Apache-2.0",
       "files": {
         "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
-        "SKILL.md": "eab355d174434cd9eff8512f1d507d3e918c6e2baebb7ab7471f935ef64c72b1",
+        "SKILL.md": "0303f67ec6197d3bf88f8ba38af850035b089e2e4ea7f074d69257e85f6a1041",
         "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "7ffb6718d97e5858e5070dbf6e1330a7118f817c372dcb43da6ebb2949c16084"
@@ -786,7 +786,7 @@
       "license": "MIT",
       "files": {
         "LICENSE": "5c609a7d9174ac54756c1cf35d486920618adb9a0a9ee8688121ea9a0d80ee70",
-        "SKILL.md": "ed16189cc059709264f17476d93c0c141da6c637f08cc382b7919ba4b19fca0f",
+        "SKILL.md": "f753d699e426ed1460b0b61d7df6acb6cf0c488045567acb9c55d019444448ed",
         "image-prompting/SKILL.md": "41e9c8bf3cecf2c929c3169f41aaeec6195a4fc50ce4d669dac025a7db400fde",
         "references/continuity_system.md": "efa14c202f76222bbb85469be2957abc56953571ca3f3d43e1a19c4d63cf68d5",
         "references/visual_bible_system.md": "2cf0c241bebe49a5f1c7d80afad2a3ca2cdb3d88411c9f242c1e27ae1cbe84d4",
