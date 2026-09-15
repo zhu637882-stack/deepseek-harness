@@ -37,10 +37,14 @@ it('sends completed shots as continuity context without preparing or generating 
   const queue = vi.fn()
   const port = {
     referenceVideoAssets: async () => ({ pages: 1, items: [] }),
-    referenceVideoDraft: async ({ frameId }: { frameId: string }) => ({ draft: null,
-      directorSource: { sha256: 'a'.repeat(64), generationPrompt: frameId === 'f'
-        ? 'The host stays in the courtyard; the visitor is outside the south gate.'
-        : 'The visitor enters from the street; the courtyard is behind the camera.' } }),
+    referenceVideoDraft: async ({ frameId }: { frameId: string }) => ({ draft: frameId === 'f' ? {
+      revision: 2, requestSha256: 'd'.repeat(64), request: { ...request, frameId,
+        bindings: [{ bindingToken: 'scene', assetId: 'scene-corrected', assetSha256: 'c'.repeat(64), label: 'Courtyard' }],
+        promptParts: [{ text: 'old execution text must not become current instructions' }] },
+    } : null,
+    directorSource: { sha256: 'a'.repeat(64), generationPrompt: frameId === 'f'
+      ? 'The host stays in the courtyard; the visitor is outside the south gate.'
+      : 'The visitor enters from the street; the courtyard is behind the camera.' } }),
     referenceVideoRuns: async ({ frameId }: { frameId: string }) => ({ items: frameId === 'f'
       ? [{ publicStatus: 'succeeded', candidates: [] }] : [] }),
     saveReferenceVideoDraft: save, queueReferenceVideo: queue,
@@ -56,9 +60,13 @@ it('sends completed shots as continuity context without preparing or generating 
   fireEvent.click(await screen.findByRole('button', { name: '自动准备整集镜头' }))
   await waitFor(() => { expect(send).toHaveBeenCalledTimes(1) })
   const prompt = send.mock.calls[0]![1]
-  const source = JSON.parse(prompt.split('当前来源：')[1]!.split('\n操作者补充：')[0]!) as { shots: { frameId: string; needsPreparation: boolean; source: { generationPrompt: string } }[] }
+  const source = JSON.parse(prompt.split('当前来源：')[1]!.split('\n操作者补充：')[0]!) as { shots: { frameId: string; needsPreparation: boolean; existingReferences: unknown[]; source: { generationPrompt: string } }[] }
   expect(source.shots.map(shot => [shot.frameId, shot.needsPreparation])).toEqual([['f', false], ['f2', true]])
   expect(source.shots[0]!.source.generationPrompt).toContain('outside the south gate')
+  expect(source.shots[0]!.existingReferences).toEqual([{ bindingToken: 'scene', assetId: 'scene-corrected',
+    assetSha256: 'c'.repeat(64), label: 'Courtyard' }])
+  expect(source.shots[1]!.existingReferences).toEqual([])
+  expect(prompt).not.toContain('old execution text must not become current instructions')
   expect(save).not.toHaveBeenCalled()
   expect(queue).not.toHaveBeenCalled()
   expect(prompt).toMatchSnapshot('batch request with completed-shot context')
