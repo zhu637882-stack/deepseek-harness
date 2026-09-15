@@ -466,3 +466,4 @@ Batch requests contain the episode shot index, planning page coordinates, source
 After a Host restart, reading a retained writing request recovers an interrupted turn through native persistence when the exact persisted director session is idle. The original history is preserved, its interruption becomes visible, and a new preparation action is enabled. Recovery never sends a model request or changes navigation.
 
 Batch retake selections are retained per project and episode. Returning to the page restores the preparation scope and its retained writing result without sending another request. Submission removes only shots it has actually queued.
+The batch panel chooses its initial expansion once per project/episode. Later progress refreshes preserve the user's open or closed state; active work opens the panel on first load.

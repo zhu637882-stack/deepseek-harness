@@ -8,6 +8,25 @@ import { request, quoteResponse } from '../../qingmu-yimeng-read-adapter/tests/r
 beforeEach(() => { Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_key: string, _options: unknown, action: (lock: object) => Promise<void>) => action({}) } }) })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); sessionStorage.clear(); localStorage.clear() })
 
+it('keeps an opened batch panel open when refreshed ports load completed shots again', async () => {
+  const readScenePlanning = vi.fn(async () => ({ projectId: 'p', episodeId: 'e', storyboard: null }))
+  const port = {
+    readScenePlanning, referenceVideoAssets: async () => ({ pages: 1, items: [] }),
+    referenceVideoDraft: async () => ({ draft: null }),
+    referenceVideoRuns: async () => ({ items: [{ publicStatus: 'succeeded', candidates: [] }] }),
+  } as unknown as BatchPort
+  const props = { projectId: 'p', episodeId: 'e', aspectRatio: '16:9', onOpenShot: vi.fn(),
+    relations: { projectId: 'p', shots: [{ shotId: 'f', frameNo: 1, durationSec: 4 }] } as never }
+  const view = render(<ReferenceVideoBatch {...props} port={port} />)
+  await waitFor(() => { expect(readScenePlanning).toHaveBeenCalledTimes(1) })
+  const panel = screen.getByLabelText('整集批量生成') as HTMLDetailsElement
+  panel.open = true
+  fireEvent(panel, new Event('toggle'))
+  view.rerender(<ReferenceVideoBatch {...props} port={{ ...port }} />)
+  await waitFor(() => { expect(readScenePlanning).toHaveBeenCalledTimes(2) })
+  expect(panel.open).toBe(true)
+})
+
 it('adopts source repairs through the existing batch button before saving the refreshed execution draft', async () => {
   vi.stubGlobal('crypto', webcrypto)
   const events: string[] = []

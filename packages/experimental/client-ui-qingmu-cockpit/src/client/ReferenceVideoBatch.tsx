@@ -30,6 +30,7 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   const [syncing, setSyncing] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const expansionScope = useRef('')
   const notesKey = `qingmu.reference-video-batch-notes.v1:${projectId}:${episodeId}`
   const readNotes = () => { try { return localStorage.getItem(notesKey) ?? '' } catch { return '' } }
   const [instructions, setInstructions] = useState(() => ({ key: notesKey, text: readNotes() }))
@@ -100,7 +101,11 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
           const result = await readBatchBasis(port, projectId, shots, episodeId)
           if (isDisposed()) return
           setBasis(result)
-          setExpanded(result.shots.some(shot => !hasBatchRun(shot)))
+          const scope = `${projectId}:${episodeId}`
+          if (expansionScope.current !== scope) {
+            expansionScope.current = scope
+            setExpanded(result.shots.some(shot => !hasBatchRun(shot) || hasActiveBatchRun(shot)))
+          }
           loaded = true
         }
         for (const shot of shots) {
@@ -260,7 +265,10 @@ export function ReferenceVideoBatch({ projectId, episodeId, relations, port, sto
   const ready = [...quotes.values()].filter(quote => quote.generationSubmissionEnabled)
   const unavailable = busy || syncing
   return <details aria-label="整集批量生成" className={styles.batch}
-    open={expanded || pendingSubmission.length > 0} onToggle={(event) => { setExpanded(event.currentTarget.open) }}>
+    open={expanded || pendingSubmission.length > 0} onToggle={(event) => {
+      expansionScope.current = `${projectId}:${episodeId}`
+      setExpanded(event.currentTarget.open)
+    }}>
     <summary>整集批量生成视频</summary>
     <p>统一准备本集表演、接续与引用，再批量生成；需要重做时勾选问题镜头，原视频保留。返回的视频自动进入候选审看。</p>
     <ol className={styles.steps} aria-label="批量制作步骤"><li>导演准备</li><li>批量生成</li><li>查看结果</li></ol>
