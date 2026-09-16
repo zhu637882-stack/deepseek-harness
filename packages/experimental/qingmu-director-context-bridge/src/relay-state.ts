@@ -110,7 +110,7 @@ const itemSchema = z.strictObject({
 /** One ordered shot and its durable preparation, submission and run evidence; blocked may retain partial evidence. */
 export type RelayItem = z.infer<typeof itemSchema>
 
-const stateSchema = z.strictObject({
+export const relayStateSchema = z.strictObject({
   version: z.literal(1), revision: positiveInteger, start: relayStartSchema,
   mode: z.enum(['running', 'paused', 'completed', 'closed']), reason: z.string().nullable(),
   createdAt: timestamp, updatedAt: timestamp, items: z.array(itemSchema),
@@ -160,7 +160,7 @@ const stateSchema = z.strictObject({
 })
 
 /** Latest full ledger snapshot. Revisions count session ledger events, including completed-batch replacement. */
-export type RelayState = z.infer<typeof stateSchema>
+export type RelayState = z.infer<typeof relayStateSchema>
 
 /** Whether the batch still reserves the director session for Host relay work.
  * @param state Full ledger snapshot to classify.
@@ -199,7 +199,7 @@ function microCny(value: string): bigint {
 export function createRelayState(input: unknown, now: string): RelayState {
   const start = relayStartSchema.parse(input)
   requireUnexpired(start, now)
-  return stateSchema.parse({
+  return relayStateSchema.parse({
     version: 1, revision: 1, start, mode: 'running', reason: null, createdAt: now, updatedAt: now,
     items: start.shots.map(shot => ({
       ...shot, phase: 'pending', admissions: [], handoff: null, materialRequests: [], submission: null, run: null,
@@ -214,7 +214,7 @@ export function createRelayState(input: unknown, now: string): RelayState {
  */
 export function readRelayState(session: Pick<Session, 'events'>): RelayState | null {
   const event = session.events.findLast(event => event.type === 'qingmu-director-relay/state')
-  return event ? stateSchema.parse(event.data) : null
+  return event ? relayStateSchema.parse(event.data) : null
 }
 
 /** Append one required whole-state event under an optimistic revision check; never flush or authorize effects.
@@ -229,7 +229,7 @@ export function appendRelayState(session: Session, next: RelayState, expectedRev
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || (current?.revision ?? 0) !== expectedRevision) {
     throw new Error('Stale relay revision')
   }
-  const parsed = stateSchema.parse(next)
+  const parsed = relayStateSchema.parse(next)
   if (parsed.revision !== expectedRevision + 1) throw new Error('Relay revision must advance by one')
   if (current) {
     if (current.start.batchId === parsed.start.batchId) {
@@ -289,7 +289,7 @@ export function appendRelayState(session: Session, next: RelayState, expectedRev
  * @returns Detached revision-plus-one state, or the unchanged validated state for an identical persisted command.
  */
 export function reserveRelaySubmission(state: RelayState, index: number, command: QueueReferenceVideoRequest, now: string): RelayState {
-  const parsed = stateSchema.parse(state)
+  const parsed = relayStateSchema.parse(state)
   if (parsed.mode !== 'running') throw new Error('Relay must be running to reserve a submission')
   requireUnexpired(parsed.start, now)
   if (!Number.isSafeInteger(index) || index < 0 || index >= parsed.items.length) throw new Error('Invalid relay item index')
@@ -312,7 +312,7 @@ export function reserveRelaySubmission(state: RelayState, index: number, command
   }
   if (count + 1 > parsed.start.authorization.maxCandidates) throw new Error('Relay candidate limit exceeded')
   if (cost + microCny(intent.authorizationCapCny) > microCny(parsed.start.authorization.maxCostCny)) throw new Error('Relay cost budget exceeded')
-  return stateSchema.parse({
+  return relayStateSchema.parse({
     ...parsed, revision: parsed.revision + 1, updatedAt: now,
     items: parsed.items.map((other, offset) => offset === index
       ? { ...other, phase: 'submitting', submission: intent, submittedAt: now }

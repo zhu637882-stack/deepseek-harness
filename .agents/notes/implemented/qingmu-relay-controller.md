@@ -1,0 +1,9 @@
+# Relay batch lifecycle controller
+
+The durable relay ledger (`relay-state.ts`) defines the whole-state session event and its optimistic-append invariants, but the batch-level orchestration — starting, admitting a director, pausing, completing, closing, and cold-recovering a batch — had no dedicated composition layer. RPC endpoints and future UI controls need these transitions to be correct, testable, and free of ad-hoc state manipulation.
+
+The controller adds seven pure functions that compose existing `relay-state` and `bridge` primitives without introducing a new state machine. `startRelayBatch` validates input, creates the ledger, appends the initial event, and claims the Host lease in one step. `admitRelayDirector` atomically appends an admission while transitioning the item phase to `preparing` and the batch mode to `running`, satisfying the `appendRelayState` invariant that admissions require `phase === 'preparing'` and `mode === 'running'`. `advanceRelayBatch` pauses a batch that has no admissions yet. `completeRelayBatch` and `closeRelayBatch` are terminal transitions. `recoverRelayBatch` re-establishes the Host lease from durable state after a cold restart.
+
+The `stateSchema` in `relay-state.ts` is exported as `relayStateSchema` so the projection and controller can share validation. Seven RPC endpoints route through the controller with field-level validation. The relay session projection is registered alongside the existing binding and dialogue projections.
+
+Tests cover all seven functions including edge cases: expired authorization, revision conflicts, batch replacement after terminal states, cold recovery without a live lease, and the admission invariant that retry requires a paused batch. Focused tests replace any need for ad-hoc integration checks; no model calls, backend queues, or paid operations are introduced.
