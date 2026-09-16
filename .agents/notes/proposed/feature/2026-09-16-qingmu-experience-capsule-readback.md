@@ -2,6 +2,8 @@
 
 Status: proposed
 
+English | [中文](2026-09-16-qingmu-experience-capsule-readback.zh.md)
+
 ## Problem
 
 The Qingmu director agent has a write side for self-learning — `qingmu_submit_experience_capsule` ([experience-capsule-tools.ts](../../../../packages/experimental/qingmu-director-context-bridge/src/experience-capsule-tools.ts)) lets the director queue one operational lesson (a pitfall it hit plus the concrete rule it will follow next time) into a JSON review queue at the runtime root. That half works: capsules land in `experience-capsule-queue.json`. But the loop never closes. No path promotes an approved capsule into anything a later session reads, and nothing injects approved capsules into the director's model input. A separate writer-side channel (`build_workflow_knowledge_block` in the Python pipeline) does inject curated knowledge, but it filters by workflow stage and all fourteen hand-authored capsules are tagged `video`/`asset` while every caller requests `story`/`script`/`shot` — so that filter drops all of them. Net effect verified against live code: **zero capsules reach the model.** A lesson the director records today is invisible to the director tomorrow.
@@ -45,4 +47,3 @@ Harness read side only. The writer Python pipeline is left untouched — routing
 - **The deploy-time seed is a run-once operator step.** [seed_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/seed_experience_capsules.py) makes it a single idempotent command, but until someone runs it against the runtime root the loop renders empty and behaves exactly as today — safe, but the fix is inert without that step. Recorded here so it is not forgotten at deploy.
 - **No operator UI yet.** Promotion runs through the pure `mergeApprovedCapsules` function via a script; a cockpit approval panel is deferred. Reviewers must edit/run by hand until then.
 - **Prompt-cache sensitivity.** Placement is at the persona tail specifically to protect the cache prefix; moving the placeholder earlier would invalidate the cached prefix on every merge and raise cost. Any future edit must preserve tail placement.
-- **Bilingual sidecar pending.** This note's `.zh.md` counterpart and `.i18n.yaml` sidecar are not yet generated; `doc-sync` will require them before merge.
