@@ -16,7 +16,7 @@ Close the loop on the harness (Node) side with a read path that mirrors the exis
 
 **A persona placeholder** — append `{{experience_capsules}}` as the final persona paragraph in [agent.cordis.yml](../../../../packages/experimental/qingmu-web/agent-presets/qingmu-director/agent.cordis.yml). Tail position keeps the long persona prefix byte-stable between merges, so the DeepSeek prompt-cache prefix only moves when capsules actually change.
 
-Deploy-time step (not code): seed `experience-capsules-active.json` at the runtime root once, transforming the fourteen existing capsules from the writer's `experience_capsules.json`, then restart the director. After that, the operator promotes future approved capsules with `mergeApprovedCapsules` (via a script or, later, a cockpit panel).
+**A deploy-time seed script** — [seed_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/seed_experience_capsules.py). Pure stdlib so it runs under the same venv the live API and worker use, with no build. It transforms the writer's curated `experience_capsules.json` into the runtime-root active store, idempotently: curated capsules sit newest-first at the front, any capsule a prior human merge already promoted survives at the tail, a malformed curated entry raises. Run it once at deploy, then restart the director. After that, the operator promotes future approved capsules with `mergeApprovedCapsules` (via a script or, later, a cockpit panel).
 
 ## Scope and blast radius
 
@@ -38,10 +38,11 @@ Harness read side only. The writer Python pipeline is left untouched — routing
 - With a seeded active store, the rendered persona ends with the `最近踩坑经验…` block listing the approved capsules newest-first, capped at the render limit.
 - A capsule promoted through `mergeApprovedCapsules` appears in the next director assembly without a process restart.
 - `loadActiveCapsules` returns `[]` (not a throw) for missing, non-JSON, and schema-invalid stores; `mergeApprovedCapsules` promotes only approved ids, dedupes by id, and trims the queue. Covered by [experience-capsule-store.spec.ts](../../../../packages/experimental/qingmu-director-context-bridge/tests/experience-capsule-store.spec.ts) (8 passing tests).
+- Seeding the writer's 14-capsule file produces a runtime-root store the read side loads verbatim (newest-first, `stages` preserved); re-seeding is idempotent and keeps a prior human merge. Covered by [test_seed_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/test_seed_experience_capsules.py) (7 passing tests).
 
 ## Risks
 
-- **The deploy-time seed is a manual step.** Until an operator seeds `experience-capsules-active.json`, the loop renders empty and behaves exactly as today — safe, but the fix is inert without that step. Recorded here so it is not forgotten at deploy.
+- **The deploy-time seed is a run-once operator step.** [seed_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/seed_experience_capsules.py) makes it a single idempotent command, but until someone runs it against the runtime root the loop renders empty and behaves exactly as today — safe, but the fix is inert without that step. Recorded here so it is not forgotten at deploy.
 - **No operator UI yet.** Promotion runs through the pure `mergeApprovedCapsules` function via a script; a cockpit approval panel is deferred. Reviewers must edit/run by hand until then.
 - **Prompt-cache sensitivity.** Placement is at the persona tail specifically to protect the cache prefix; moving the placeholder earlier would invalidate the cached prefix on every merge and raise cost. Any future edit must preserve tail placement.
 - **Bilingual sidecar pending.** This note's `.zh.md` counterpart and `.i18n.yaml` sidecar are not yet generated; `doc-sync` will require them before merge.
