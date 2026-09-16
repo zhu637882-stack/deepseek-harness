@@ -10,7 +10,7 @@ Status: proposed
 
 ## 方案
 
-在 harness（Node）侧合上闭环：加一条与既有写入路径对称的读取路径，再加一个供人工提升步骤使用的纯合并库。三块：
+在 harness（Node）侧合上闭环：加一条与既有写入路径对称的读取路径，再加一个供人工提升步骤使用的纯合并库。五块：
 
 **一个新的读取/合并模块**——[experience-capsule-store.ts](../../../../packages/experimental/qingmu-director-context-bridge/src/experience-capsule-store.ts)。它把 active store 放在运行时身份旁边（`experience-capsules-active.json`，由 `capsuleActiveStorePathFor(runtimeRoot)` 解析，与队列同一套运行时根约定，因此 harness 进程无需知道仓库路径）。`loadActiveCapsules(storePath)` 读取并校验它，store 缺失或损坏时返回 `[]`。`renderExperienceCapsulesBlock(capsules, limit=12)` 把最新在前的胶囊渲染成一段中文人格块（`最近踩坑经验（人审入库，本次会话优先遵守）：` 后接 `- 症状→规则` 行），为空时返回 `''`。`mergeApprovedCapsules(queue, active, approvedIds, stagesById)` 是运维步骤使用的纯函数：把已审核的队列条目提升到 active store 最前、覆盖复用同一 id 的既有条目、并把已提升条目从队列移除。
 
@@ -18,7 +18,9 @@ Status: proposed
 
 **一个人格占位符**——在 [agent.cordis.yml](../../../../packages/experimental/qingmu-web/agent-presets/qingmu-director/agent.cordis.yml) 中，把 `{{experience_capsules}}` 追加为人格最后一段。尾部位置让冗长的人格前缀在多次合并之间保持逐字节稳定，因此 DeepSeek 提示缓存前缀只在胶囊真正变化时才移动。
 
-**一个部署期 seed 脚本**——[seed_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/seed_experience_capsules.py)。纯标准库，因此在 live API 与 worker 所用的同一 venv 下即可运行、无需构建。它把写入侧精选的 `experience_capsules.json` 幂等地转换为运行时根的 active store：精选胶囊最新在前置于最前，此前任何人工合并已提升的胶囊在尾部存活，损坏的精选条目直接抛错。部署时运行一次，然后重启导演。此后运维用 `mergeApprovedCapsules`（经脚本，或以后经 cockpit 面板）提升未来的已审核胶囊。
+**一个部署期 seed 脚本**——[seed_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/seed_experience_capsules.py)。纯标准库，因此在 live API 与 worker 所用的同一 venv 下即可运行、无需构建。它把写入侧精选的 `experience_capsules.json` 幂等地转换为运行时根的 active store：精选胶囊最新在前置于最前，此前任何人工合并已提升的胶囊在尾部存活，损坏的精选条目直接抛错。部署时运行一次，然后重启导演。
+
+**一个运维提升 CLI**——[promote_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/promote_experience_capsules.py)。与 seed 脚本同样的纯标准库/venv/无需构建归宿，同样的 `--runtime-root` 环境变量缺省。它是一次性 seed 之后反复进行的人工审核步骤：`--list` 打印队列中的胶囊及其 id，`--approve <id>`（可重复）或 `--approve-all` 提升它们，`--stages <id>=phase1,phase2` 给已提升胶囊打阶段标签，`--dry-run` 只预览不写入。它读取写入侧队列（裸数组）与 active store（`{capsules: […]}`），套用 `mergeApprovedCapsules` 钉住的同一提升语义（已审核条目最新在前置于最前、覆盖复用的 id、从队列移除），再把两个文件写回。以后的 cockpit 审核面板可替换它而无需改动磁盘格式。
 
 ## 范围与波及面
 
@@ -41,9 +43,10 @@ Status: proposed
 - 经 `mergeApprovedCapsules` 提升的胶囊，无需进程重启即出现在下一次导演组装中。
 - `loadActiveCapsules` 对缺失、非 JSON、schema 非法的 store 返回 `[]`（而非抛错）；`mergeApprovedCapsules` 只提升已审核 id、按 id 去重、并裁剪队列。由 [experience-capsule-store.spec.ts](../../../../packages/experimental/qingmu-director-context-bridge/tests/experience-capsule-store.spec.ts) 覆盖（8 条测试通过）。
 - 对写入侧 14 条胶囊文件做 seed 会产出读取侧逐字加载的运行时根 store（最新在前、`stages` 保留）；重复 seed 幂等并保留此前的人工合并。由 [test_seed_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/test_seed_experience_capsules.py) 覆盖（7 条测试通过）。
+- 提升 CLI 把已审核队列条目最新在前移入 active store、覆盖复用的 id、从队列移除、按 id 去重并忽略未知 id、套用审阅者 `stages`、拒绝损坏的已审核条目，且 `--dry-run` 不写任何文件。由 [test_promote_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/test_promote_experience_capsules.py) 覆盖（9 条测试通过）。
 
 ## 风险
 
 - **部署期 seed 是一次性运维步骤。** [seed_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/seed_experience_capsules.py) 把它做成单条幂等命令，但在有人对运行时根运行它之前，闭环渲染为空、行为与今天完全一致——安全，但不跑这一步修复就是惰性的。此处记录以免部署时遗忘。
-- **暂无运维 UI。** 提升经纯函数 `mergeApprovedCapsules` 通过脚本进行；cockpit 审核面板延后。在此之前审阅者需手工编辑/运行。
+- **暂无运维 UI。** 提升经 [promote_experience_capsules.py](../../../../packages/experimental/qingmu-director-context-bridge/python/promote_experience_capsules.py) CLI 进行（对 `mergeApprovedCapsules` 语义的薄封装）；cockpit 审核面板延后。在此之前审阅者手工先 `--list` 再 `--approve`。
 - **提示缓存敏感。** 占位符特意放在人格尾部以保护缓存前缀；把它前移会在每次合并时失效已缓存前缀并抬高成本。任何未来改动都必须保持尾部位置。
