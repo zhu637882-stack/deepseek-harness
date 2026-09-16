@@ -49,7 +49,7 @@ describe('renderExperienceCapsulesBlock', () => {
       { id: 'b', symptom: '', rule: '规则B' },
     ]
     expect(renderExperienceCapsulesBlock(capsules)).toBe(
-      '最近踩坑经验（人审入库，本次会话优先遵守）：\n- 症状A→规则A\n- 规则B',
+      '\n最近踩坑经验（人审入库，本次会话优先遵守）：\n- 症状A→规则A\n- 规则B',
     )
   })
 
@@ -58,7 +58,7 @@ describe('renderExperienceCapsulesBlock', () => {
       id: `c${index}`, symptom: '', rule: `规则${index}`,
     }))
     const block = renderExperienceCapsulesBlock(capsules, 2)
-    expect(block.split('\n')).toHaveLength(3)
+    expect(block.trimStart().split('\n')).toHaveLength(3)
     expect(block).toContain('规则0')
     expect(block).toContain('规则1')
     expect(block).not.toContain('规则2')

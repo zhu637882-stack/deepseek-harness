@@ -93,8 +93,9 @@ export function loadActiveCapsules(storePath: string): ActiveCapsule[] {
  * Render the approved capsules as one persona block.
  * @param capsules - approved capsules, newest-first.
  * @param limit - maximum lines rendered; the rest are dropped as too old.
- * @returns the block, or `''` when there are no capsules so the persona line
- * interpolates to nothing.
+ * @returns the block prefixed with a line break, so it always starts its own persona
+ * line; `''` when there are no capsules, so the inline persona placeholder
+ * interpolates to nothing and leaves no trailing blank line.
  */
 export function renderExperienceCapsulesBlock(capsules: readonly ActiveCapsule[], limit = DEFAULT_RENDER_LIMIT): string {
   const lines = capsules.slice(0, Math.max(0, limit)).map((capsule) => {
@@ -103,7 +104,7 @@ export function renderExperienceCapsulesBlock(capsules: readonly ActiveCapsule[]
     return symptom ? `${symptom}→${rule}` : rule
   })
   if (lines.length === 0) return ''
-  return `最近踩坑经验（人审入库，本次会话优先遵守）：\n${lines.map(line => `- ${line}`).join('\n')}`
+  return `\n最近踩坑经验（人审入库，本次会话优先遵守）：\n${lines.map(line => `- ${line}`).join('\n')}`
 }
 
 /**
