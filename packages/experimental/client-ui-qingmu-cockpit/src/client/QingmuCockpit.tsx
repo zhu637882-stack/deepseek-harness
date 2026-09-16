@@ -14,6 +14,7 @@ import { AssetWorkbench } from './AssetWorkbench.tsx'
 import { PromptIrWorkspace } from './PromptIrWorkspace.tsx'
 import { SceneReferenceWorkspace } from './SceneReferenceWorkspace.tsx'
 import { ReferenceVideoBatch } from './ReferenceVideoBatch.tsx'
+import { RelayBatchPanel } from './RelayBatchPanel.tsx'
 import { ScriptWorkspace } from './ScriptWorkspace.tsx'
 import { CreateProjectWorkspace, TextImportWorkspace } from './CreationWorkspace.tsx'
 import { ProjectLibrary } from './ProjectLibrary.tsx'
@@ -704,6 +705,7 @@ export function QingmuCockpit({
     </div>
 
   const batchVideoPanel = <>
+    {directorSessionId && <RelayBatchPanel sessionId={directorSessionId} directorBridge={directorBridge} />}
     {episodeId && shotRelations && <ReferenceVideoBatch key={`${projectId}:${episodeId}`}
       projectId={projectId} episodeId={episodeId} relations={shotRelations} port={port} storyPort={nativeDirectorSession?.story} aspectRatio={stringOf(selectedProject?.aspect_ratio) || '16:9'}
       onCollected={refreshWorkflowProjectionAfterCommit}

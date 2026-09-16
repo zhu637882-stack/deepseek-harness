@@ -188,6 +188,34 @@ export function apply(ctx: ClientContext): void {
     clear: (sessionId, scope, ownerId, signal) => director('clear', { sessionId, scope, ownerId }, signal),
     recover: (sessionId, signal) => director<DirectorContextRecoveryResult>('recover', { sessionId }, signal),
     bindProposal: (sessionId, proposal, signal) => director('bindProposal', { sessionId, proposal }, signal),
+    readRelayBatch: async (sessionId, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'readRelayState', { sessionId }, signal)) as
+        import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').RelayState | null,
+    startRelayBatch: async (sessionId, input, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'startRelayBatch', { sessionId, input }, signal)) as {
+        readonly state: import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').RelayState
+      },
+    admitRelayDirector: async (sessionId, index, admission, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'admitRelayDirector', { sessionId, index, admission }, signal)) as {
+        readonly state: import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').RelayState
+      },
+    advanceRelayBatch: async (sessionId, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'advanceRelayBatch', { sessionId }, signal)) as {
+        readonly state: import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').RelayState
+      },
+    completeRelayBatch: async (sessionId, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'completeRelayBatch', { sessionId }, signal)) as {
+        readonly state: import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').RelayState
+      },
+    closeRelayBatch: async (sessionId, reason, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'closeRelayBatch', { sessionId, reason }, signal)) as {
+        readonly state: import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').RelayState
+      },
+    recoverRelayBatch: async (sessionId, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'recoverRelayBatch', { sessionId }, signal)) as {
+        readonly state: import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').RelayState | null
+        readonly recovered: boolean
+      },
   }
 
   const port: QingmuYimengPort = {
