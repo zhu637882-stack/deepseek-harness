@@ -1,8 +1,25 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { DirectorContextClientPort, RelayState } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
+import type { DirectorContextClientPort, RelayStart, RelayState } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
+import type { YimengShotRelationsProjection } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import { RelayBatchPanel } from '../src/client/RelayBatchPanel.tsx'
+
+function relationsFixture(): YimengShotRelationsProjection {
+  const sha = (character: string) => character.repeat(64)
+  return {
+    schema: 'jason.scene-shot-beat-element-relations.v1', projectId: 'project-1', episodeId: 'episode-1',
+    storyboardRevision: { episodeRevision: 1, revisionId: 'rev-1', revisionVersion: 1, sourceSha256: sha('a') },
+    scenes: [{ sceneId: 'scene-1', name: '场景一', profileRevision: 1, snapshotSha256: sha('b') }],
+    shots: [
+      { shotId: 'shot-1', frameNo: 1, sceneId: 'scene-1', title: '开场', durationSec: 5,
+        dialogueRhythm: { cueCount: 0, timedCueCount: 0, cues: [] }, beats: [], elements: [] },
+      { shotId: 'shot-2', frameNo: 2, sceneId: 'scene-1', title: null, durationSec: 8,
+        dialogueRhythm: { cueCount: 0, timedCueCount: 0, cues: [] }, beats: [], elements: [] },
+    ],
+    valid: true, blockers: [],
+  }
+}
 
 function runningBatch(): RelayState {
   return {
@@ -126,5 +143,67 @@ describe('RelayBatchPanel', () => {
     })} />)
     expect(await screen.findByRole('alert')).toBeDefined()
     expect(screen.getByText(/rpc unavailable/)).toBeDefined()
+  })
+
+  it('creates a batch only after instruction and explicit paid confirmation, mapping shots and authorization', async () => {
+    const startRelayBatch = vi.fn(async (_sessionId: string, _input: RelayStart) => ({ state: runningBatch() }))
+    render(<RelayBatchPanel sessionId="session-1" relations={relationsFixture()} directorBridge={bridge({
+      readRelayBatch: vi.fn(async () => null), startRelayBatch,
+      advanceRelayBatch: vi.fn(), completeRelayBatch: vi.fn(), closeRelayBatch: vi.fn(), recoverRelayBatch: vi.fn(),
+    })} />)
+    const create = await screen.findByRole('button', { name: '创建接力批次' }) as HTMLButtonElement
+    expect(create.disabled).toBe(true)
+    expect((screen.getByRole('checkbox', { name: /镜1 · 开场/ }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('checkbox', { name: /镜2 · 未命名/ }) as HTMLInputElement).checked).toBe(true)
+    fireEvent.change(screen.getByLabelText('本批指令'), { target: { value: '按当前导演设计准备这两镜。' } })
+    expect(create.disabled).toBe(true)
+    fireEvent.click(screen.getByRole('checkbox', { name: /我已确认/ }))
+    expect(create.disabled).toBe(false)
+    fireEvent.click(create)
+    await waitFor(() => { expect(startRelayBatch).toHaveBeenCalledOnce() })
+    const [calledSession, input] = startRelayBatch.mock.calls[0] as unknown as [string, RelayStart]
+    expect(calledSession).toBe('session-1')
+    expect(input.batchId).toMatch(/^batch_/u)
+    expect(input.projectId).toBe('project-1')
+    expect(input.episodeId).toBe('episode-1')
+    expect(input.instruction).toBe('按当前导演设计准备这两镜。')
+    expect(input.director).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+    expect(input.observer).toEqual({ provider: 'qingmu-vision', model: 'qwen3.8-flash' })
+    expect(input.shots).toHaveLength(2)
+    expect(input.shots[0]).toEqual({
+      scope: { projectId: 'project-1', episodeId: 'episode-1', sceneId: 'scene-1', shotId: 'shot-1' },
+      label: '镜1 · 开场',
+      parameters: { duration: 5, resolution: '720P', ratio: '16:9', audio: true, prompt_extend: false },
+      retake: false,
+    })
+    expect(input.authorization).toMatchObject({
+      paidConfirmed: true, maxCostCny: '1.000000', maxCandidates: 2,
+    })
+    expect(Date.parse(input.authorization.expiresAt)).toBeGreaterThan(Date.now())
+    expect(await screen.findByText(/运行中/)).toBeDefined()
+  })
+
+  it('keeps creation disabled for a zero cost cap and counts only selected shots', async () => {
+    const startRelayBatch = vi.fn(async (_sessionId: string, _input: RelayStart) => ({ state: runningBatch() }))
+    render(<RelayBatchPanel sessionId="session-1" relations={relationsFixture()} directorBridge={bridge({
+      readRelayBatch: vi.fn(async () => null), startRelayBatch,
+      advanceRelayBatch: vi.fn(), completeRelayBatch: vi.fn(), closeRelayBatch: vi.fn(), recoverRelayBatch: vi.fn(),
+    })} />)
+    const create = await screen.findByRole('button', { name: '创建接力批次' }) as HTMLButtonElement
+    fireEvent.change(screen.getByLabelText('本批指令'), { target: { value: '只准备第二镜。' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /我已确认/ }))
+    fireEvent.change(screen.getByLabelText('费用上限'), { target: { value: '0' } })
+    expect(create.disabled).toBe(true)
+    expect(screen.getByText(/费用上限需为大于 0 的金额/)).toBeDefined()
+    fireEvent.change(screen.getByLabelText('费用上限'), { target: { value: '0.5' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /镜1 · 开场/ }))
+    expect(create.disabled).toBe(false)
+    fireEvent.click(create)
+    await waitFor(() => { expect(startRelayBatch).toHaveBeenCalledOnce() })
+    const input = (startRelayBatch.mock.calls[0] as unknown as [string, RelayStart])[1]
+    expect(input.shots).toHaveLength(1)
+    expect(input.shots[0]?.scope.shotId).toBe('shot-2')
+    expect(input.authorization.maxCandidates).toBe(1)
+    expect(input.authorization.maxCostCny).toBe('0.5')
   })
 })

@@ -10,4 +10,11 @@
 .items li { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:baseline; border-bottom:1px solid var(--dsw-alias-border-l2); padding:8px 0; }
 .items li span { color:var(--dsw-alias-label-secondary); font-size:13px; }
 .actions { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-top:12px; }
-@media(max-width:700px) { .relay { padding:14px; } .actions button, .actions input { flex:1 1 100%; } }
+.create { display:grid; gap:16px; margin-top:8px; }
+.create fieldset { border:1px solid var(--dsw-alias-border-l2); border-radius:8px; padding:12px; display:grid; gap:8px; margin:0; }
+.create legend { font-weight:600; padding:0 6px; }
+.create label { display:flex; flex-wrap:wrap; gap:8px; align-items:center; min-height:44px; }
+.create input[type="checkbox"] { width:20px; height:20px; min-height:20px; accent-color:var(--qingmu-accent); }
+.create textarea { width:100%; padding:8px 12px; border:1px solid var(--dsw-alias-border-l2); border-radius:8px; background:var(--dsw-alias-bg-layer-2); color:var(--dsw-alias-label-primary); font:inherit; }
+.create textarea:focus-visible { outline:2px solid var(--qingmu-accent); outline-offset:3px; }
+@media(max-width:700px) { .relay { padding:14px; } .actions button, .actions input { flex:1 1 100%; } .create input { flex:1 1 100%; } }

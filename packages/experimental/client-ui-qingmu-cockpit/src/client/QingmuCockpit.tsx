@@ -705,7 +705,8 @@ export function QingmuCockpit({
     </div>
 
   const batchVideoPanel = <>
-    {directorSessionId && <RelayBatchPanel sessionId={directorSessionId} directorBridge={directorBridge} />}
+    {directorSessionId && <RelayBatchPanel sessionId={directorSessionId} directorBridge={directorBridge}
+      relations={shotRelations ?? undefined} aspectRatio={stringOf(selectedProject?.aspect_ratio) || '16:9'} />}
     {episodeId && shotRelations && <ReferenceVideoBatch key={`${projectId}:${episodeId}`}
       projectId={projectId} episodeId={episodeId} relations={shotRelations} port={port} storyPort={nativeDirectorSession?.story} aspectRatio={stringOf(selectedProject?.aspect_ratio) || '16:9'}
       onCollected={refreshWorkflowProjectionAfterCommit}
