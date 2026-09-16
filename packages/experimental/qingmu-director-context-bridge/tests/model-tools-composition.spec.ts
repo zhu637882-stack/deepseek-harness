@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
@@ -37,11 +37,18 @@ class MockAdapter extends BaseMockAdapter {
 import * as ModelTools from '../src/model-tools.ts'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { draftMethod } from '../examples/native-draft-fixture.ts'
+import { createYimengReadHandler } from '../../qingmu-yimeng-read-adapter/src/index.ts'
+import { createYimengCommandHandler } from '../../qingmu-yimeng-command-adapter/src/index.ts'
+import { canonical } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
+import { digest } from '../src/native-draft.ts'
+import { claimHostDirectorBinding, createDirectorContextBridge } from '../src/bridge.ts'
+import { appendRelayState, createRelayState } from '../src/relay-state.ts'
 
 const roots: string[] = []
 const contexts: Context[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const ctx of contexts.splice(0)) await ctx.fiber.dispose()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
@@ -102,7 +109,8 @@ function includesExactString(value: unknown, expected: string): boolean {
 }
 
 /** A real Loader preset: host capabilities stay root-owned; native tools mount only below the agent. */
-async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = false, sourceNotes = '', commandCalls: string[] = []): Promise<Context> {
+async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = false, sourceNotes = '', commandCalls: string[] = [],
+  upstream?: ReturnType<typeof dialogueWriter>): Promise<Context> {
   const presetRoot = fileURLToPath(new URL('../../qingmu-web/agent-presets/', import.meta.url))
 
   const ctx = new Context()
@@ -138,8 +146,9 @@ async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = fa
   await ctx.plugin(AgentPresets, { default: 'qingmu-director', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
   ctx.llm.registerAdapter(['mock'], adapter)
   let committed = false
-  ctx.provide('qingmuYimengCommand', async (endpoint, payload) => {
+  ctx.provide('qingmuYimengCommand', async (endpoint, payload, signal) => {
     commandCalls.push(endpoint)
+    if (upstream) return upstream.command(endpoint, payload, signal)
     if (dialogue && endpoint === 'readDialogueEditCapability') return { ok: true, value: {} }
     if (dialogue && endpoint === 'proposeScript') {
       expect(payload).toMatchObject({ script: { sourceNotes, scenes: [{ dialogues: [{ line: '有人在吗？' }] }] } })
@@ -171,7 +180,8 @@ async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = fa
       sources: [{ content: '先确认人物意图与场景阻力，再安排机位和声画。' }],
     } }
   })
-  if (dialogue) ctx.provide('qingmuYimengRead', async (endpoint) => {
+  if (dialogue) ctx.provide('qingmuYimengRead', async (endpoint, payload, signal) => {
+    if (upstream) return upstream.read(endpoint, payload, signal)
     if (endpoint === 'script') return { ok: true, value: { found: true, projectId: scope.projectId, episodeId: scope.episodeId,
       revision: 1, scriptSha256: '0'.repeat(64), script: { sourceNotes, scenes: [{ title: '公路',
         dialogues: [{ lineId: 'line-6', speakerId: 'lina', line: '有人吗？', verbatimText: '有人吗？' }] }] } } }
@@ -188,6 +198,111 @@ async function harness(adapter: MockAdapter, sessionRoot?: string, dialogue = fa
   return ctx
 }
 
+/** Writer wire fixtures are normalized by the actual read/command adapters; no tools are replaced. */
+function dialogueWriter(linkedSecondShot: boolean) {
+  const timestamp = '2026-09-16T00:00:00Z'
+  const makeScript = (line: string) => ({ scenes: [{ title: '门口', dialogues: [{ lineId: 'line-6', speakerId: 'lina', line, verbatimText: line }] }] })
+  let script = makeScript('有人吗？'), revision = 1
+  let proposal: { script: typeof script; references: { affectedShotIds: string[] }[]; harnessSessionId: string } | undefined
+  let receipt: Record<string, unknown> | undefined
+  function currentContext(): DirectorContextSnapshot {
+    const { contextSnapshotSha256: _old, ...body } = snapshot()
+    const current = { ...body, script: { revision, sha256: digest(script) },
+      storyboard: { ...body.storyboard, id: `revision-${revision}`, version: revision }, sourceScene: script.scenes[0]! }
+    return { ...current, contextSnapshotSha256: digest(current) }
+  }
+  function relations() {
+    const context = currentContext()
+    const cue = { schemaVersion: 'dialogue-cue-v2', lineId: 'line-6', speakerId: 'lina',
+      verbatimText: script.scenes[0]!.dialogues[0]!.line, plannedStartSec: 1, plannedEndSec: 3, timingVerified: true, legacy: false }
+    return { schema: 'jason.scene-shot-beat-element-relations.v1', projectId: scope.projectId, episodeId: scope.episodeId,
+      storyboardRevision: {
+        episodeRevision: revision, revisionId: context.storyboard.id,
+        revisionVersion: revision, sourceSha256: context.storyboard.sourceHash,
+      },
+      scenes: [{ sceneId: scope.sceneId, name: '门口', profileRevision: 1, snapshotSha256: sha }],
+      shots: [scope.shotId, 'shot-7'].map((shotId, index) => {
+        const cues = index === 0 || linkedSecondShot ? [cue] : []
+        return { shotId, sceneId: scope.sceneId, frameNo: index + 6, title: index === 0 ? '呼喊' : '反应', durationSec: 4,
+          dialogueRhythm: { cueCount: cues.length, timedCueCount: cues.length, cues }, beats: [],
+          elements: [{ elementKind: 'scene', elementId: scope.sceneId, name: '门口', profileRevision: 1,
+            snapshotSha256: sha, currentReferenceAvailability: 'missing', currentReference: null }] }
+      }), valid: true, blockers: [] }
+  }
+  function workflow() {
+    const shotRelations = relations()
+    const { episodeRevision, ...storyboardRevision } = shotRelations.storyboardRevision
+    const shots = shotRelations.shots.map(shot => ({
+      shotId: shot.shotId, shotSnapshotSha256: digest(shot), heroFrame: null, canvas: null, blockers: [],
+    }))
+    return { schema: 'jason.episode-workflow-projection.v1', projectId: scope.projectId, episodeId: scope.episodeId,
+      sourceRevision: { script: revision }, inputFingerprint: digest(shotRelations), activeTaskId: null, status: 'ready',
+      hasData: true, isStale: false, qualityPassed: false, selected: false, canProceed: false, stages: {},
+      stageHandoff: {}, assets: {}, shots: {}, video: {}, audio: {}, timeline: {}, budget: {}, release: {}, blockers: [], legacy: {},
+      director: { shotRelations, heroFrameStoryboards: { schema: 'jason.qingmu-hero-frame-storyboards.v1',
+        projectId: scope.projectId, episodeId: scope.episodeId, episodeRevision, storyboardRevision,
+        shotRelationsSha256: digest(shotRelations), shots, shotsSha256: digest(shots), valid: true, blockers: [] } } }
+  }
+  function changeSet() {
+    if (!proposal) throw new Error('Writer fixture has no proposed script')
+    return { schema: 'jason.qingmu-change-set.v1', id: 'change-6', workspaceId: null,
+      projectId: scope.projectId, episodeId: scope.episodeId, targetType: 'episode_script', targetId: scope.episodeId,
+      baseRevision: 1, baseSnapshotSha256: digest(makeScript('有人吗？')), payloadSha256: digest(proposal.script),
+      originKind: 'human', actorUserId: 'owner-test', harnessSessionId: proposal.harnessSessionId, status: 'draft',
+      authoritativeRevision: null, authoritativeSnapshotSha256: null, committedByUserId: null,
+      committedEventId: null, committedAt: null, createdAt: timestamp, updatedAt: timestamp }
+  }
+  const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    const path = url.pathname
+    if (path.endsWith('/director-inference/context')) return Response.json(currentContext())
+    if (path === '/api/episodes/episode-a/script') return Response.json({
+      found: true, projectId: scope.projectId, episodeId: scope.episodeId,
+      script, scriptCanonicalJson: canonical(script), scriptSha256: digest(script),
+      revision, editedByUser: revision > 1, updatedAt: timestamp,
+    })
+    if (path === '/api/episodes/episode-a/workflow-projection') return Response.json(workflow())
+    if (path === '/api/qingmu/dialogue-edit/capability') return Response.json({ schema: 'qingmu.dialogue-transaction-capability.v1',
+      referenceSchema: 'qingmu.dialogue-edit-reference.v1', atomicScriptAndFrames: true })
+    if (path === '/api/qingmu/episodes/episode-a/script/change-sets' && init?.method === 'POST') {
+      if (typeof init.body !== 'string') throw new Error('Expected a script proposal body')
+      proposal = JSON.parse(init.body) as NonNullable<typeof proposal>
+      return Response.json({ schema: 'jason.qingmu-change-set-proposal.v1', changeSet: changeSet(), nextAction: 'preview' }, { status: 201 })
+    }
+    if (path === '/api/qingmu/change-sets/change-6:preview' && init?.method === 'POST' && proposal) {
+      return Response.json({ schema: 'jason.qingmu-change-set-preview.v1', changeSet: changeSet(), baseScript: script,
+        proposedScript: proposal.script, authoritativeCurrentScript: script, changeSetId: 'change-6', payloadSha256: digest(proposal.script),
+        baseRevision: 1, authoritativeRevision: revision, changed: true, changedPaths: ['$.scenes[0].dialogues[0]'],
+        authoritativeChangedPaths: [], revisionConflict: false, baseSnapshotConflict: false, canCommit: true,
+        invalidatedStages: [], preflight: { status: 'pass' }, references: proposal.references, previewSha256: digest(proposal) })
+    }
+    if (path.endsWith('/change-sets/change-6/command-receipt')) return receipt
+      ? Response.json({ schema: 'jason.qingmu-command-receipt-recovery.v1', recovered: true, receiptSha256: digest(receipt), receipt })
+      : Response.json({ detail: { code: 'command_receipt_not_found' } }, { status: 404 })
+    if (path === '/api/qingmu/change-sets/change-6:commit' && init?.method === 'POST' && proposal) {
+      if (typeof init.body !== 'string') throw new Error('Expected a script commit body')
+      const command = JSON.parse(init.body) as { idempotencyKey: string; expectedPayloadSha256: string; baseRevision: number }
+      if (command.baseRevision !== revision || command.expectedPayloadSha256 !== digest(proposal.script)) {
+        return Response.json({ detail: { code: 'script_revision_conflict' } }, { status: 409 })
+      }
+      script = structuredClone(proposal.script)
+      revision++
+      receipt = { schema: 'jason.qingmu-episode-script-commit-result.v1', changeSetId: 'change-6', commandReceiptId: 'saved-6', eventId: 'saved-event-6',
+        projectId: scope.projectId, episodeId: scope.episodeId, baseRevision: 1, authoritativeRevision: revision,
+        authoritativeSnapshotSha256: digest(script), payloadSha256: command.expectedPayloadSha256, idempotencyKey: command.idempotencyKey,
+        changed: true, invalidatedStages: [], deduplicated: false, committedAt: timestamp }
+      return Response.json(receipt)
+    }
+    throw new Error(`Unexpected Writer fixture request: ${init?.method} ${path}`)
+  })
+  const read = createYimengReadHandler({}, { fetch, readToken: () => 'fixture-token' })
+  const command = createYimengCommandHandler({}, { fetch, readToken: () => 'fixture-token', readYimeng: read })
+  return {
+    read, command, fetch, context: currentContext, relations,
+    script: () => script, proposal: () => proposal, revision: () => revision,
+  }
+}
+
 async function createQingmuAgent(ctx: Context, id: string): Promise<{ agent: Agent; dispose(): Promise<void> }> {
   return await ctx.agents.create({
     sessionId: SessionId(id), agentOptions: { provider: 'mock', model: 'mock' },
@@ -195,6 +310,117 @@ async function createQingmuAgent(ctx: Context, id: string): Promise<{ agent: Age
     setup: async agentCtx => void await ctx.agentPresets.mount(agentCtx, 'qingmu-director'),
   })
 }
+
+describe('relay current-shot dialogue through the real preset and Writer adapters', () => {
+  it.each([
+    { mode: 'relay single-shot commit and continuation', relay: true, linkedSecondShot: false },
+    { mode: 'relay linked second-shot stage without commit', relay: true, linkedSecondShot: true },
+    { mode: 'ordinary linked second-shot commit', relay: false, linkedSecondShot: true },
+  ])('should enforce $mode from actual Writer relations', async ({ relay, linkedSecondShot }) => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No live network allowed in dialogue fixtures'))
+    const upstream = dialogueWriter(linkedSecondShot)
+    const before = upstream.context()
+    const oldRelations = upstream.relations()
+    // eslint-disable-next-line prefer-const -- adapter closures capture agent before harness creates it
+    let agent: Agent
+    const adapter = new MockAdapter([
+      toolCallResponse('dialogue-read', 'qingmu_read_dialogue', {}),
+      () => toolCallResponse('dialogue-stage', 'qingmu_stage_dialogue_edit', {
+        receiptId: JSON.parse(resultText(agent.session.events, 'qingmu_read_dialogue')).receiptId,
+        lineId: 'line-6', before: '有人吗？', after: '有人在吗？',
+      }),
+      () => toolCallResponse('dialogue-commit', 'qingmu_commit_dialogue_edit', {
+        receiptId: JSON.parse(resultText(agent.session.events, 'qingmu_stage_dialogue_edit')).receiptId,
+      }),
+      toolCallResponse('dialogue-continue', 'qingmu_read_bound_context', {}), textResponse('Dialogue review finished; no media generated.'),
+    ])
+    const sessionRoot = await mkdtemp(join(tmpdir(), 'qingmu-relay-dialogue-')); roots.push(sessionRoot)
+    const ctx = await harness(adapter, sessionRoot, true, '', [], upstream)
+    const handle = await createQingmuAgent(ctx, `dialogue-${relay ? 'relay' : 'ordinary'}-${linkedSecondShot ? 'linked' : 'single'}`)
+    agent = handle.agent
+    const ownerId = relay ? 'relay-dialogue-batch' : 'browser-dialogue-test'
+    const readPort = { async readDirectorContext(target: typeof scope, signal?: AbortSignal) {
+      const response = await upstream.command('readDirectorContext', target, signal ?? new AbortController().signal)
+      if (!response.ok) throw new Error(response.error.message)
+      return { ok: true as const, context: response.value as DirectorContextSnapshot }
+    } }
+    const message = createUserMessage({ source: { kind: 'user' }, content: [
+      { type: 'text', text: JSON.stringify({ schema: 'qingmu.native-director-request.v1', sessionId: agent.session.id,
+        ownerId, scope, contextSnapshotSha256: before.contextSnapshotSha256 }) },
+      { type: 'text', text: '把当前镜头的有人吗？改成有人在吗？，继续核对本镜。' },
+    ] })
+    if (relay) {
+      const now = new Date().toISOString()
+      const initial = appendRelayState(agent.session, createRelayState({
+        batchId: ownerId, projectId: scope.projectId, episodeId: scope.episodeId, instruction: '只准备当前镜头。',
+        director: { provider: 'mock', model: 'mock' },
+        shots: [{ scope, label: '当前镜头', retake: false,
+          parameters: { duration: 4, resolution: '720P', ratio: '16:9', audio: true, prompt_extend: false } }],
+        authorization: { authorizationId: 'relay-dialogue-authorization', paidConfirmed: true, maxCostCny: '1', maxCandidates: 1,
+          expiresAt: new Date(Date.now() + 3600000).toISOString() },
+      }, now), 0)
+      const lease = claimHostDirectorBinding(agent.session, ownerId, readPort)
+      ctx.effect(() => lease.release, 'dialogue-test-host-lease')
+      expect(await lease.enter(scope)).toMatchObject({ status: 'current' })
+      appendRelayState(agent.session, { ...initial, revision: 2,
+        items: initial.items.map(item => ({ ...item, phase: 'preparing', admissions: [{
+          message, contextSnapshotSha256: before.contextSnapshotSha256, admittedAt: now,
+        }] })) }, initial.revision)
+    } else {
+      expect(await createDirectorContextBridge(readPort).enter(agent.session, scope, undefined, ownerId)).toMatchObject({ status: 'current' })
+    }
+    expect(await ctx.sessions.flush(agent.session)).toBe(true)
+    agent.followup(message)
+    await agent.whenIdle()
+    function toolResult(callId: string) {
+      const event = agent.session.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === callId)
+      if (event?.type !== 'tool/result') throw new Error(`Missing ${callId}: ${JSON.stringify(agent.session.events.at(-1))}`)
+      return { error: event.data.message.content.some(part => part.isError),
+        text: event.data.message.content.flatMap(part => part.content).filter(block => block.type === 'text').map(block => block.text).join('') }
+    }
+    const input = toolResult('dialogue-read'), staged = toolResult('dialogue-stage')
+    expect(input.error, input.text).toBe(false)
+    expect(staged.error, staged.text).toBe(false)
+    const affectedShotIds = linkedSecondShot ? [scope.shotId, 'shot-7'] : [scope.shotId]
+    const stage = JSON.parse(staged.text)
+    expect(stage).toMatchObject({ proposalStored: true, businessStateChanged: false,
+      preview: { affectedShots: affectedShotIds.map(shotId => ({ shotId })) } })
+    expect(upstream.proposal()).toMatchObject({ references: [{ affectedShotIds }],
+      script: { scenes: [{ dialogues: [{ line: '有人在吗？' }] }] } })
+    const posts = upstream.fetch.mock.calls.filter(([, init]) => init?.method === 'POST')
+      .map(([input]) => new URL(input instanceof Request ? input.url : input).pathname)
+    expect(posts.filter(path => path.endsWith('/script/change-sets'))).toHaveLength(1)
+    expect(posts.filter(path => path.endsWith(':preview'))).toHaveLength(1)
+    const saved = toolResult('dialogue-commit')
+    const denied = relay && linkedSecondShot
+    if (denied) {
+      expect.soft(saved).toMatchObject({ error: true, text: expect.stringMatching(/relay/i) })
+      expect.soft(posts.filter(path => path.endsWith(':commit')), 'Linked second shot must not be formally committed').toEqual([])
+      expect.soft(upstream.revision()).toBe(1)
+      expect.soft(upstream.relations()).toEqual(oldRelations)
+      expect.soft(upstream.script().scenes[0]!.dialogues[0]!.line).toBe('有人吗？')
+      expect.soft(agent.session.events.filter(event => event.type === 'qingmu-director-dialogue/state' && event.data.status === 'saved')).toEqual([])
+    } else {
+      expect(saved.error, saved.text).toBe(false)
+      expect(JSON.parse(saved.text)).toMatchObject({ businessStateChanged: true, providerCalls: 0, mediaGenerated: false,
+        continuation: { before: before.contextSnapshotSha256, after: upstream.context().contextSnapshotSha256 } })
+      expect(posts.filter(path => path.endsWith(':commit'))).toEqual(['/api/qingmu/change-sets/change-6:commit'])
+      expect(upstream.revision()).toBe(2)
+      expect(upstream.script().scenes[0]!.dialogues[0]!.line).toBe('有人在吗？')
+    }
+    const continued = toolResult('dialogue-continue')
+    expect(continued.error, continued.text).toBe(false)
+    expect.soft(JSON.parse(continued.text)).toMatchObject({ contextSnapshot: { script: { revision: denied ? 1 : 2 } } })
+    expect(adapter.requests).toHaveLength(5)
+    expect(agent.session.events.filter(event => event.type === 'turn/start')).toHaveLength(1)
+    expect(agent.session.events.findLast(event => event.type === 'turn/end')).toMatchObject({ data: { reason: { kind: 'completed' } } })
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(await ctx.sessions.flush(agent.session)).toBe(true)
+    const stored = await ctx.sessionPersistence.load(agent.session.id)
+    expect(stored.events.filter(event => event.type === 'tool/result')).toEqual(agent.session.events.filter(event => event.type === 'tool/result'))
+    await handle.dispose()
+  })
+})
 
 describe('Qingmu model tools through a real preset and agent loop', () => {
   it('calculates a camera change in an unbound planning session and logs the result for the next director step', async () => {

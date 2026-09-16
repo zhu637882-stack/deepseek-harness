@@ -549,6 +549,8 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
       // A selection switch after dispatch cannot undo a confirmed write; report its captured target.
       return ports.boundedJson({ schema: 'qingmu.native-reference-saved.v1', scope: current.state.binding.scope,
         revision: value.draft?.revision, requestSha256: value.draft?.requestSha256,
+        frameSha256: value.frameSha256, directorSourceSha256: value.draft?.request.directorSourceSha256 ?? null,
+        contextSnapshotSha256: current.state.binding.contextSnapshotSha256,
         providerCalls: 0, generationQueued: false, mediaSelectionChanged: false,
         activeShotChanged: current.session.events.findLast(event => event.type === 'qingmu-director-context/state')?.seq !== current.seq,
         guidance: 'Saved to the shot identified by scope in this result. Restore it in the workspace, prepare its reference materials, then preview and quote before generating. Existing unsaved text remains local. No candidate was generated or adopted.',

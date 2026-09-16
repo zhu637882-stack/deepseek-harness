@@ -49,6 +49,8 @@ Browser entry supplies a new `ownerId` for each view binding. `clear(session, sc
 
 `recover` first folds the durable DSh log, then rereads the current Yimeng context. A changed context SHA appends a new complete binding and clears the old proposal automatically. An unavailable context or model capability preserves the last known binding and returns `manualWorkAllowed: true`; manual editing remains independent.
 
+A Host batch takes the same session through `claimHostDirectorBinding`, which selects only batch-listed shots while the batch is open and requires `enter` to run in `running` mode with an unexpired reservation. `withHostDirectorOperation` and `withHostDirectorStream` hold the lease across awaits and asynchronous iterator cleanup, and `release()` during in-flight work defers removal until that work settles. A terminal batch returns the session to browser ownership, and browser `enter`, `clear`, `bindProposal`, and `recover` refuse while a batch is open.
+
 Async entry and recovery use a per-session generation plus binding-event compare-and-swap. A late result returns `superseded` and cannot overwrite a newer object choice or proposal attachment. Unbound recovery and rejected proposal attachment do not cancel a pending entry. The projection state remains nullable version 1; updated event readers must ship together before null events are produced.
 
 The Cordis plugin registers the `qingmuDirectorContext` session projection and a loopback-only browser facade. The Qingmu bundle mounts it before the cockpit. The workspace binds legacy planning shots or the selected canonical automatic-storyboard shot to the same current session; canonical binding does not enable legacy saves. The facade never exposes the underlying Host command handler, token, Provider payload, or permit.
@@ -92,6 +94,14 @@ Run the [keyless example](examples/model-tools-keyless.ts) from the Harness root
 
 Native dialogue reads and previews preserve imported `sourceLineId` identities and the assigned actor without inventing timing. The atomic Writer command updates the script and linked frame dialogue together, invalidates affected media/prompts, and refreshes the bound director context. Old reference-video drafts remain inspectable but require an explicit revision against the new frame source before reuse. The planning origin stays immutable; manual planning edits after dialogue commits require the complete validated script receipt chain and matching current frame copies. Conflicting identity aliases reject the edit. Run the keyless example with `--dialogue` to inspect the shipped preset’s actual read/preview transcript; it saves no script and generates no media. See the [decision](../../../.agents/notes/implemented/bug-fix/2026-09-10-qingmu-imported-dialogue.md).
 
+## Director relay ledger
+
+The required typed event `qingmu-director-relay/state` carries a whole shot-batch ledger: an immutable `start` with project, episode, instruction, the authorized director provider and model, an optional authorized observer route and the ordered shots with their parameters and retake flags; an `authorization` with explicit `paidConfirmed`, decimal `maxCostCny`, `maxCandidates` and `expiresAt`; and per-item phase plus recorded evidence — admitted director requests, preparation handoff, material request, queued command, public run status, timestamps and reason. `appendRelayState` compares an observed `revision` before accepting the next snapshot, and re-checks the aggregate rules on read and on append: batch input and creation time never change, admissions only append, handoff and command hashes and run identity are fixed, a settled status never reverts, at most one submission stays unsettled, and cost and candidate totals stay inside the reservation. `reserveRelaySubmission` records the confirmed queue command before any dispatch, so a failed attempt still consumes its cap; every effect path requires `sessions.flush` to return true and re-checks the admission after each await. See the [relay decision](../../../.agents/notes/implemented/feature/2026-09-16-qingmu-director-relay-ledger.md).
+
+`registerRelayExecutionGuard`, mounted by the opt-in model-tools plugin, applies these gates only while an open batch reserves the session. It requires the turn's single admitted request, pins the model route to the authorized director, admits an auxiliary call only for its logged pending tool request on the authorized observer route, refreshes the binding before each effect, and refuses working-cut saves, acoustic imports, experience-capsule submissions, and dialogue commits that touch another shot.
+
+`readReferenceHandoff` derives preparation evidence from the durable log rather than assistant text: one consumed admission whose fixed target matches the shot, a completed turn, and a confirmed `qingmu_save_reference_draft` as that turn's last write carrying scope, revision, request, frame, director-source, and context hashes. `verifyReferenceHandoff` then rereads the Writer context and the saved draft twice and reports drift as blocked. The loopback facade exposes this check as `readReferenceHandoff`; a ready result is preparation evidence and still requires the workspace's own authoritative validation before any paid submission.
+
 ## Model Experience
 
 ### Session binding bridge
@@ -122,6 +132,20 @@ Only an opted-in agent receives the schemas; each requested context or method bo
 
 New results append to conversation history. Changed context or method text changes that suffix; the plugin does not rewrite earlier messages or inject unstable system-prompt content.
 
+### Director relay ledger
+
+#### What the model sees
+
+Nothing from the ledger. `qingmu-director-relay/state` is Host-side batch state read by the execution guard, not derived model history. A refused step or effect surfaces as that tool's or turn's ordinary failure.
+
+#### Token effect
+
+Zero from ledger snapshots. Batch input, revision and evidence never enter a system prompt or a message.
+
+#### KV Cache effect
+
+Relay transitions append state events between requests; they do not rewrite earlier messages. Compaction inside a reserved batch runs on the authorized director route and follows the existing conversation rules.
+
 ## Known Limitations and Deferred Work
 
 The owned Python entry accepts an optional `referenceVideoConnection` containing exact `provider: dashscope`, `model: wan3.0-video`, `projectId`, `episodeId`, an absolute `credentialEnvFile`, and the probed `credentialFingerprint`. On a cleanly stopped native instance, `scripts/qingmu-local.py connect-reference-video` takes `--root`, `--instance-id`, `--project-id`, `--episode-id`, and `--credential-env-file`; `disconnect-reference-video` takes the same identifiers without the file. These operations validate the private literal DashScope key and write configuration metadata only. Startup clones settings only for that owner's reference preview/material services; global API settings and the Worker remain credential-free with spending disabled. Production and fixture modes cannot coexist with this connection. Startup rejects a changed key; rotation requires an explicit reconnect and restart. Disconnect remains available if the bound database scope is missing; an audit-finalization failure can be recovered by repeating disconnect. Receipts bind the exact key fingerprint and Beijing model, not an inferred account identity. Explicit material preparation uses the existing temporary-upload service, with no automatic retry or generation. The [connection decision](../../../.agents/notes/implemented/architecture/2026-09-10-qingmu-material-connection.md) records the scope and tradeoff.
@@ -133,6 +157,8 @@ The opt-in `tests/native-first-draft-connected.spec.ts` connects the shipped nat
 - Legacy replay proposal drift remains checked by `checkDirectorProposalFreshness`; native prompt suggestions use their recorded read receipts and the read-only facade instead.
 - Native tools do not enable a real DeepSeek route, fee or production canary. The optional owned material connection enables explicit DashScope temporary upload only.
 
+
+No production code creates relay state yet: this package owns the ledger, Host lease, execution guard and log-derived handoff read, but no batch controller or workspace control drives a batch, so those paths stay unused until a later change wires them to the page. A reserved batch also settles one submission at a time, which bounds wall-clock speed to a single queued candidate per shot rather than to the director.
 
 ## Whole-film sound execution
 

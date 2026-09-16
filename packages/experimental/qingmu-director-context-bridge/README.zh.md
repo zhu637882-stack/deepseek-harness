@@ -51,6 +51,8 @@
 
 `recover` 先折叠持久 DSh 日志，再重新读取当前易梦 context。context SHA 发生变化时，自动追加新的完整绑定并清空旧 proposal。context 或模型能力不可用时，保留最后已知绑定并返回 `manualWorkAllowed: true`，不阻断普通人工编辑。
 
+Host 批次通过 `claimHostDirectorBinding` 接管同一会话：批次开放期间只能选择批次列出的镜头，且 `enter` 要求处于 `running` 模式并拥有未过期预留。`withHostDirectorOperation` 与 `withHostDirectorStream` 在 await 及异步迭代器清理期间持有租约，进行中的工作时调用 `release()` 会延后到该工作落定。终态批次把会话归还浏览器，批次开放期间浏览器的 `enter`、`clear`、`bindProposal` 与 `recover` 均被拒绝。
+
 异步进入和恢复使用 Session 级操作代次与 binding 事件 CAS。迟到结果返回 `superseded`，不能覆盖较新的对象选择或 proposal 挂接。未绑定时的恢复、被拒绝的 proposal 挂接不会取消正在等待的进入操作。投影状态仍为可空的版本 1；产生空事件之前，须一起交付更新后的事件读取器。
 
 Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopback 的浏览器 facade。青木 bundle 在 cockpit 之前挂载它。工作区把旧规划镜头或选中的权威自动分镜绑定到同一当前会话；自动分镜绑定不会启用旧规划保存。facade 不会暴露底层 Host command handler、token、Provider payload 或 permit。
@@ -94,6 +96,14 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 原生台词读取和预览保留导入的 `sourceLineId` 及已分配演员，不虚构时序。Writer 原子命令同时更新剧本与关联帧台词，使受影响的媒体和提示词失效，并刷新绑定的导演上下文。旧引用视频草稿保留供查看，复用前须针对新帧来源明确修订。分镜初始来源保持不变；台词修改后的手工分镜编辑要求完整且通过校验的剧本回执链，以及一致的当前帧副本。编号别名冲突时拒绝修改。免密钥示例加 `--dialogue` 可查看随包预设的真实读取/预览记录；示例不保存剧本、不生成媒体。见[决策说明](../../../.agents/notes/implemented/bug-fix/2026-09-10-qingmu-imported-dialogue.zh.md)。
 
+## 导演接力账本
+
+必填类型化事件 `qingmu-director-relay/state` 承载整份镜头批次账本：不可变的 `start` 记录项目、集、指令、被授权的导演 provider 与模型、可选的被授权观察路线，以及有序镜头和各自的参数与重做标记；`authorization` 记录显式 `paidConfirmed`、十进制 `maxCostCny`、`maxCandidates` 与 `expiresAt`；每个条目记录自身阶段与已收集证据——已消费的导演请求、准备交接、素材请求、排队指令、公开运行状态及时间戳和原因。`appendRelayState` 先比对观察到的 `revision` 再接纳下一份快照，并在读取与追加时都复核整体规则：批次输入与创建时间不变，admissions 只追加，交接与指令哈希及运行身份固定，已落定状态不回退，最多一笔提交保持未结算，成本与候选总额不超过预留额度。`reserveRelaySubmission` 在任何派发之前写入确认后的排队指令，失败尝试同样消耗额度；所有效果路径先要求 `sessions.flush` 返回 true，并在每次 await 之后重新核对 admission。见[接力决策](../../../.agents/notes/implemented/feature/2026-09-16-qingmu-director-relay-ledger.zh.md)。
+
+`registerRelayExecutionGuard` 由可选装载的 model-tools 插件注册，只在开放批次预留会话期间施加这些门禁。它要求本轮只有唯一被消费的请求，把模型路线固定到被授权的导演模型，只为已记录的待处理工具请求在被授权观察路线上放行辅助调用，每次效果前刷新绑定，并拒绝成片剪辑保存、声学导入、经验胶囊提交以及涉及其他镜头的对白提交。
+
+`readReferenceHandoff` 从持久日志而非助手文本推导准备证据：一条目标固定且与镜头一致的已消费 admission、一个 completed 轮次，以及该轮次最后一次写入为已确认的 `qingmu_save_reference_draft`，其中带有范围、版本、请求、首帧、导演来源与上下文哈希。`verifyReferenceHandoff` 随后两次读取 Writer 上下文与已保存草稿，并把漂移报告为 blocked。仅限 loopback 的接口以 `readReferenceHandoff` 暴露该核对；ready 结果只是准备证据，付费提交前仍由工作区自身完成权威校验。
+
 ## 模型体验
 
 ### Session 绑定桥
@@ -124,6 +134,20 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 新结果追加到对话历史。上下文或方法正文变化会改变该后缀；插件不重写先前消息，也不向系统提示词注入不稳定内容。
 
+### 导演接力账本
+
+#### 模型看到什么
+
+账本本身不进入模型视野。`qingmu-director-relay/state` 是 Host 侧批次状态，由执行门禁读取，不进入派生模型历史。被拒绝的步骤或效果按该工具、该轮次的普通失败呈现。
+
+#### Token 影响
+
+账本快照零 token 影响。批次输入、版本与证据不进入系统提示词或消息。
+
+#### KV Cache 影响
+
+接力状态变化在两次请求之间追加事件，不重写先前消息。预留批次内的压缩走被授权的导演路线，遵循既有对话规则。
+
 ## 已知限制与后续工作
 
 专属 Python 入口接受可选 `referenceVideoConnection`，字段严格为 `provider: dashscope`、`model: wan3.0-video`、`projectId`、`episodeId`、绝对路径 `credentialEnvFile` 和探测取得的 `credentialFingerprint`。原生实例正常停止后，`scripts/qingmu-local.py connect-reference-video` 接收 `--root`、`--instance-id`、`--project-id`、`--episode-id`、`--credential-env-file`；断开命令 `disconnect-reference-video` 使用相同身份参数但不传文件。这些操作验证私有文件中的字面量 DashScope Key，只写配置元数据。启动仅为该所有者的引用预览和素材服务复制设置；全局 API 设置与 Worker 不取得凭证，付费保持关闭。此连接不能与 production 或 fixture 模式共存。启动会拒绝已变化的 Key；轮换需显式重新连接并重启。绑定的数据库范围缺失时仍可断开；审计完成写入失败后可重复断开以恢复。回执绑定精确 Key 指纹和北京模型，不推断账号身份。显式素材准备复用现有临时上传服务，不自动重试或生成。[连接决策](../../../.agents/notes/implemented/architecture/2026-09-10-qingmu-material-connection.zh.md)记录范围与取舍。
@@ -134,6 +158,8 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 - 使用相同 Writer/Core 路径，设置 `QINGMU_FULL_HOST_BROWSER=1` 并通过 Vitest 运行 `tests/native-first-draft-host.spec.ts`，验证随包完整 Host 和构建客户端。它使用真实服务和脚本化模型输出，覆盖原生传输、采用/编辑/保存/Ready/刷新及旧对象拒绝。runtime 和驾驶舱工件在一次性目录构建，与实际服务字节核对，共享安装包不改动。合成 Ready 选择不是人工内容签收、生产启用、真实模型创作质量或生成。
 - 旧回放建议仍由 `checkDirectorProposalFreshness` 检查漂移；原生提示词建议使用其已记录的读取回执和只读接口。
 - 原生工具不启用真实 DeepSeek 路由、费用或生产 canary；可选的专属素材连接只允许显式 DashScope 临时上传。
+
+生产里还没有任何代码创建接力状态：本包拥有账本、Host 租约、执行门禁与由日志推导的交接读取，但没有批次控制器，也没有页面控件驱动批次，因此在后续改动接入工作区之前这些路径保持未使用。预留批次同时只允许一笔未结算提交，墙钟收益受每镜一个排队候选限制，而非受导演限制。
 
 ## 整片声音执行
 

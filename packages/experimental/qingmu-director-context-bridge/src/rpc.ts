@@ -7,6 +7,7 @@ import type { DirectorReplayProposal } from '@deepseek-ai/dsh-experimental-qingm
 import { createDirectorContextBridge } from './bridge.ts'
 import { latestNativeDraftProposal, readNativeDraftInput, type NativeDraftReaders } from './native-draft.ts'
 import { latestNativeFirstDraftProposal, readNativeFirstDraftInput } from './native-first-draft.ts'
+import { verifyReferenceHandoff, type ReferenceHandoff } from './reference-handoff.ts'
 import type { NativeFirstDraftProposalResult } from './types.ts'
 import type {
   DirectorContextBridgeRpcResult, DirectorContextReadPort, DirectorObjectScope, NativeDraftProposalResult, NativeDirectorReadiness,
@@ -37,16 +38,22 @@ function scope(value: unknown): DirectorObjectScope | null {
  * Build the safe browser facade; it never returns Yimeng tokens or Host permits.
  * @param sessions Host-owned durable session lookup.
  * @param port Host-only Yimeng context reader.
- * @returns A loopback RPC handler limited to context binding and advisory proposal lineage.
+ * @param draftReaders Optional native prompt and first-draft proposal readers.
+ * @param readiness Optional scoped native tool registration check.
+ * @param referenceReader Optional loopback reader for the saved reference draft.
+ * @returns A loopback RPC handler limited to context binding, advisory proposal lineage,
+ * native readiness and reference handoff evidence.
  */
 export function createDirectorContextRpcHandler(
   sessions: Pick<SessionStore, 'get'>,
   port: DirectorContextReadPort,
   draftReaders?: NativeDraftReaders,
   readiness?: (session: Session) => NativeDirectorReadiness,
+  referenceReader?: ConnectionRpcHandler,
 ): ConnectionRpcHandler {
   const bridge = createDirectorContextBridge(port)
-  type Result = DirectorContextBridgeRpcResult | NativeDraftProposalResult | NativeFirstDraftProposalResult | NativeDirectorReadiness
+  type Result = DirectorContextBridgeRpcResult | NativeDraftProposalResult | NativeFirstDraftProposalResult
+    | NativeDirectorReadiness | ReferenceHandoff
   return async (endpoint, payload, signal): Promise<RpcResult<Result>> => {
     try {
       const raw = object(payload)
@@ -55,6 +62,13 @@ export function createDirectorContextRpcHandler(
       }
       const session = sessions.get(SessionId(raw.sessionId))
       if (session === undefined) return bad('director context session unavailable')
+      if (endpoint === 'readReferenceHandoff') {
+        if (!exact(raw, ['sessionId', 'messageId', 'scope']) || id(raw.messageId) === null) return bad('reference handoff fields invalid')
+        const requested = scope(raw.scope)
+        if (requested === null) return bad('reference handoff scope invalid')
+        signal.throwIfAborted()
+        return { ok: true, value: await verifyReferenceHandoff(session, raw.messageId as string, requested, port, referenceReader, signal) }
+      }
       if (endpoint === 'readNativeDirectorReadiness') {
         if (!exact(raw, ['sessionId'])) return bad('native readiness fields invalid')
         signal.throwIfAborted()

@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
@@ -47,6 +47,7 @@ async function harness(command: ConnectionRpcHandler, method: ConnectionRpcHandl
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(SystemPrompt)
+  await ctx.plugin(SessionStore)
   await ctx.plugin(ToolRuntime)
   ctx.provide('qingmuYimengCommand', command)
   ctx.provide('qingmuImagoMethod', method)

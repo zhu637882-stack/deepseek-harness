@@ -5,6 +5,7 @@ import { createUserMessage, ReasoningEffortId, type TokenUsage } from '@deepseek
 import { snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-session'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { digest } from './native-draft.ts'
+import { readRelayState, relayBatchIsOpen } from './relay-state.ts'
 
 /** Deployment-selected observer; credentials stay in the existing LLM adapter. */
 export interface ReferenceVisionConfig {
@@ -46,6 +47,11 @@ export async function inspectReferenceImage(ctx: Context, attachment: ImageAttac
     && event.data.inspectionId === inspectionId && event.data.status === 'completed')
   if (previous?.type === 'qingmu-director-vision/result') {
     return { mode: 'vision_report' as const, observer: config, reused: true, ...imageDelivery, ...previous.data }
+  }
+  const relay = readRelayState(agent.session)
+  if (relay && relayBatchIsOpen(relay)
+    && (relay.start.observer?.provider !== config.provider || relay.start.observer.model !== config.model)) {
+    throw new Error('Relay visual inspection requires explicit authorization for this observer provider and model.')
   }
   const signal = AbortSignal.any([exec.signal, AbortSignal.timeout(config.timeoutMs)])
   const prepared = await llm.prepareCall({ provider: config.provider, model: config.model,

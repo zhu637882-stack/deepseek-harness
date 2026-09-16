@@ -4,7 +4,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { CallId, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createScope } from '@deepseek-ai/dsh-scope'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { draftContext, draftScope, draftMethod } from '../examples/native-draft-fixture.ts'
@@ -19,7 +19,7 @@ afterEach(async () => { for (const ctx of contexts.splice(0)) await ctx.fiber.di
 
 async function harness(bound = false, imported = false) {
   const ctx = new Context(); contexts.push(ctx)
-  await ctx.plugin(SystemPrompt); await ctx.plugin(ToolRuntime)
+  await ctx.plugin(SystemPrompt); await ctx.plugin(SessionStore); await ctx.plugin(ToolRuntime)
   const source: YimengScriptResponse = { found: true, projectId: draftScope.projectId, episodeId: draftScope.episodeId,
     revision: 1, scriptSha256: '0'.repeat(64), editedByUser: false, updatedAt: '2026-09-07T00:00:00Z',
     script: { scenes: [{ title: '公路', dialogues: [{ lineId: 'line6', speakerId: 'lina', line: '有人吗？', verbatimText: '有人吗？' }] }] } }

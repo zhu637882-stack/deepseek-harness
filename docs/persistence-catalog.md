@@ -568,7 +568,7 @@ Source: [`packages/experimental/qingmu-project-context/src/types.ts:102`](../pac
 'qingmu-director-context/state': DirectorContextBindingState | null
 ```
 
-Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:261`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:264`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 ### `qingmu-director-dialogue/*`
 
@@ -586,7 +586,7 @@ Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:261`
 }
 ```
 
-Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:265`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:268`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 <a id="qingmu-director-dialoguestate--log-only"></a>
 
@@ -597,7 +597,20 @@ Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:265`
 'qingmu-director-dialogue/state': NativeDialogueExecution
 ```
 
-Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:263`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:266`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
+### `qingmu-director-relay/*`
+
+<a id="qingmu-director-relaystate--log-only"></a>
+
+#### `qingmu-director-relay/state` — log-only
+
+```ts persistence-catalog
+/** Required whole-state relay ledger; readiness and reservation never imply approval or successful flush. */
+'qingmu-director-relay/state': RelayState
+```
+
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:258`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 ### `qingmu-director-vision/*`
 
@@ -610,7 +623,7 @@ Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:263`
 'qingmu-director-vision/request': { readonly callId: string; readonly inspectionId: string; readonly assetSha256: string; readonly request: JsonValue }
 ```
 
-Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:257`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:260`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 <a id="qingmu-director-visionresult--log-only"></a>
 
@@ -623,7 +636,7 @@ Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:257`
 
 Types: [TokenUsage](subsystems/llm-streaming.md)
 
-Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:259`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+Source: [`packages/experimental/qingmu-director-context-bridge/src/types.ts:262`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
 ### `request/*`
 

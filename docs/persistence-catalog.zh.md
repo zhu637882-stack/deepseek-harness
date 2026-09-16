@@ -601,6 +601,19 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源： [`packages/experimental/qingmu-director-context-bridge/src/types.ts:263`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
 
+### `qingmu-director-relay/*`
+
+<a id="qingmu-director-relaystate--log-only"></a>
+
+#### `qingmu-director-relay/state` — 仅日志
+
+```ts persistence-catalog
+/** Required whole-state relay ledger; readiness and reservation never imply approval or successful flush. */
+'qingmu-director-relay/state': RelayState
+```
+
+来源： [`packages/experimental/qingmu-director-context-bridge/src/types.ts:258`](../packages/experimental/qingmu-director-context-bridge/src/types.ts)
+
 ### `qingmu-director-vision/*`
 
 <a id="qingmu-director-visionrequest--log-only"></a>

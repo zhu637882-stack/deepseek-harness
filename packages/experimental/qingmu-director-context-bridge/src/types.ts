@@ -8,6 +8,7 @@ import type {
 import type { JsonValue, Session } from '@deepseek-ai/dsh-session'
 import type { ImagoDirectorInstructionsResponse } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type { YimengPromptIrResponse, YimengPromptIrBootstrapResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import type { RelayState } from './relay-state.ts'
 
 /** Full current upstream and C5 read before authoring the first prompt; no invented Ready baseline. */
 export interface NativeFirstDraftInput {
@@ -253,6 +254,8 @@ export interface DirectorContextClientPort {
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
+    /** Required whole-state relay ledger; readiness and reservation never imply approval or successful flush. */
+    'qingmu-director-relay/state': RelayState
     /** Complete auxiliary model input, including durable image references. */
     'qingmu-director-vision/request': { readonly callId: string; readonly inspectionId: string; readonly assetSha256: string; readonly request: JsonValue }
     /** Visual observations and measured usage, never creative or adoption approval. */
@@ -273,11 +276,14 @@ declare module '@deepseek-ai/dsh-session/types' {
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionStateMap {
+    'qingmuDirectorRelay': RelayState | null
     'qingmuDirectorContext': DirectorContextBindingState | null
     'qingmuDialogueExecution': NativeDialogueExecution | null
   }
 
   interface SessionProjectionMap {
+    /** Latest validated relay ledger; null means no batch has been recorded. */
+    'qingmuDirectorRelay': RelayState | null
     /** Future Qingmu UI mount point; absent package capability is distinct from an unbound null value. */
     'qingmuDirectorContext': DirectorContextBindingProjection
     'qingmuDialogueExecution': NativeDialogueExecution | null

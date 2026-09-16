@@ -7,9 +7,11 @@ import { snapshotJsonValue, type JsonValue, type Session } from '@deepseek-ai/ds
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { DirectorContextSnapshot } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
-import { createDirectorContextBridge, currentState } from './bridge.ts'
+import { currentState, refreshNativeDirectorBinding } from './bridge.ts'
+import { registerRelayExecutionGuard } from './relay-execution.ts'
+import { readRelayState, relayBatchIsOpen } from './relay-state.ts'
 import { assertNativeTurnTarget } from './native-prompt-target.ts'
-import type { DirectorContextBindingState } from './types.ts'
+import type { DirectorContextBindingState, DirectorContextReadPort } from './types.ts'
 import type {} from './index.ts'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import { findNativeDraftInput, nativeDraftFields, nativeDraftSource, readNativeDraftInput } from './native-draft.ts'
@@ -28,7 +30,7 @@ import type { ReferenceVisionConfig } from './reference-vision.ts'
 /** Opt-in native-agent consumer; the Host binding plugin remains independently usable. */
 export const name = 'qingmu-director-model-tools'
 /** Configured Host handlers own credentials, normalization and method-root selection. */
-export const inject = ['tools', 'systemPrompt', 'qingmuYimengCommand', 'qingmuImagoMethod']
+export const inject = ['tools', 'systemPrompt', 'sessions', 'qingmuYimengCommand', 'qingmuImagoMethod']
 
 /** Bounds apply to each complete tool response, never to a silently truncated method. */
 export interface Config {
@@ -98,6 +100,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       : renderExperienceCapsulesBlock(loadActiveCapsules(capsuleActiveStorePathFor(capsuleRuntimeRoot)))),
   'experienceCapsules.variable()')
   registerCameraGeometryTool(ctx, value => boundedJson(value, maxOutputBytes))
+  registerRelayExecutionGuard(ctx)
 
   async function readBoundContext(exec: ToolRunContext): Promise<{
     session: Session
@@ -111,7 +114,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     assertNativeTurnTarget(session, exec.callId, 'before-refresh')
     let context: DirectorContextSnapshot | undefined
     let outputError: Error | undefined
-    const bridge = createDirectorContextBridge({
+    const port: DirectorContextReadPort = {
       async readDirectorContext(scope, signal) {
         const result = await ctx.qingmuYimengCommand('readDirectorContext', scope, signal ?? exec.signal)
         exec.signal.throwIfAborted()
@@ -125,12 +128,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         context = result.value as DirectorContextSnapshot
         return { ok: true, context }
       },
-    })
-    const previous = bridge.current(session)
-    if (previous === null) {
+    }
+    if (currentState(session) === null) {
       throw new Error('No Qingmu shot is bound to this session. Select a project and shot in the workspace; manual editing remains available.')
     }
-    const result = await bridge.enter(session, previous.binding.scope, exec.signal)
+    const result = await refreshNativeDirectorBinding(session, port, exec.signal)
     exec.signal.throwIfAborted()
     assertNativeTurnTarget(session, exec.callId)
     if (outputError !== undefined) throw outputError
@@ -289,6 +291,10 @@ export function apply(ctx: Context, config: Config = {}): void {
         const stage = findStagedDialogue(exec.agent.session, args.receiptId)
         const state = currentState(exec.agent.session)
         if (!state || JSON.stringify(state.binding.scope) !== JSON.stringify(stage.scope)) throw new Error('当前镜头已切换，未提交。')
+        const relay = readRelayState(exec.agent.session)
+        if (relay && relayBatchIsOpen(relay) && stage.preview.affectedShots.some(shot => shot.shotId !== stage.scope.shotId)) {
+          throw new Error('Relay preparation cannot commit dialogue changes affecting another shot. Keep the staged edit for human review.')
+        }
         const status = { scope: stage.scope, before: stage.preview.before, after: stage.preview.after,
           affectedShots: stage.preview.affectedShots, unchangedShots: stage.preview.unchangedDialogueShots }
         exec.agent.session.append('qingmu-director-dialogue/state', { ...status, status: 'saving', commandReceiptId: null })

@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { Context } from '@deepseek-ai/cordis'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import type {
   DirectorContextSnapshot,
   DirectorReplayProposal,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { createDirectorContextBridge } from '../src/index.ts'
+import { claimHostDirectorBinding, hasHostDirectorOwner, hasBrowserDirectorOwner, invalidateHostDirectorBinding,
+  assertNativePromptSelection, refreshNativeDirectorBinding, withHostDirectorOperation, withHostDirectorStream } from '../src/bridge.ts'
+import { appendRelayState, createRelayState, readRelayState } from '../src/relay-state.ts'
 import type {
   DirectorContextReadPort,
   DirectorContextReadResult,
@@ -80,6 +88,299 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   const promise = new Promise<T>((complete) => { resolve = complete })
   return { promise, resolve }
 }
+
+function beginRelay(session: Session) {
+  const now = Date.now()
+  return appendRelayState(session, createRelayState({ batchId: 'relay-1', projectId: firstScope.projectId,
+    episodeId: firstScope.episodeId, instruction: '逐镜整理执行稿，保留导演判断。', director: { provider: 'mock', model: 'mock' },
+    shots: [firstScope, secondScope].map(scope => ({ scope, label: scope.shotId, retake: false,
+      parameters: { duration: 8, resolution: '720P', ratio: '16:9', audio: true, prompt_extend: false } })),
+    authorization: { authorizationId: 'authorization-1', paidConfirmed: true, maxCostCny: '9.600000', maxCandidates: 2,
+      expiresAt: new Date(now + 60_000).toISOString() } }, new Date(now).toISOString()), 0)
+}
+
+describe('Host relay director binding', () => {
+  it('keeps the Host lease distinct from browser ownership and refuses browser mutations', async () => {
+    const session = Session.create(SessionId('relay-director'))
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) },
+      { ok: true, context: context(firstScope, sha('a')) })
+    const browser = createDirectorContextBridge(port)
+    await browser.enter(session, firstScope, undefined, 'browser-1')
+    beginRelay(session)
+    const lease = claimHostDirectorBinding(session, 'relay-1', port)
+    try {
+      expect(await lease.enter(firstScope)).toMatchObject({ status: 'current' })
+      expect(hasHostDirectorOwner(session)).toBe(true)
+      expect(hasBrowserDirectorOwner(session)).toBe(false)
+      const target = { schema: 'qingmu.native-director-request.v1' as const, sessionId: session.id,
+        ownerId: 'relay-1', scope: firstScope, contextSnapshotSha256: sha('a') }
+      expect(() => assertNativePromptSelection(session, target)).not.toThrow()
+      expect(() => assertNativePromptSelection(session, { ...target, ownerId: 'browser-1' })).toThrow()
+      const before = structuredClone(session.events)
+      await expect(browser.enter(session, secondScope, undefined, 'browser-2')).rejects.toThrow(/relay/i)
+      await expect(browser.enter(session, firstScope)).rejects.toThrow(/relay/i)
+      expect(() => browser.clear(session, firstScope, 'browser-1')).toThrow(/relay/i)
+      await expect(browser.recover(session)).rejects.toThrow(/relay/i)
+      expect(() => browser.bindProposal(session, proposal(firstScope, sha('a')))).toThrow(/relay/i)
+      expect(session.events).toEqual(before)
+      expect(port.calls).toHaveLength(2)
+    } finally { lease.release() }
+  })
+
+  it('allows native same-shot refresh without allowing an unlisted Host target', async () => {
+    const session = Session.create(SessionId('relay-director'))
+    beginRelay(session)
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) },
+      { ok: true, context: context(firstScope, sha('b')) })
+    const lease = claimHostDirectorBinding(session, 'relay-1', port)
+    try {
+      await lease.enter(firstScope)
+      expect(await refreshNativeDirectorBinding(session, port)).toMatchObject({ status: 'current', state: {
+        binding: { scope: firstScope, contextSnapshotSha256: sha('b') },
+      } })
+      await expect(lease.enter({ ...firstScope, shotId: 'not-authorized' })).rejects.toThrow(/scope|shot/i)
+      expect(port.calls).toEqual([firstScope, firstScope])
+    } finally { lease.release() }
+  })
+
+  it('invalidates an older browser read before the Host publishes its binding', async () => {
+    const session = Session.create(SessionId('relay-director'))
+    const waiting = deferred<DirectorContextReadResult>()
+    const browser = createDirectorContextBridge({ readDirectorContext: () => waiting.promise })
+    const old = browser.enter(session, firstScope, undefined, 'old-browser')
+    beginRelay(session)
+    const lease = claimHostDirectorBinding(session, 'relay-1', queuedPort({ ok: true, context: context(secondScope, sha('b')) }))
+    try {
+      await lease.enter(secondScope)
+      waiting.resolve({ ok: true, context: context(firstScope, sha('a')) })
+      expect(await old).toMatchObject({ status: 'superseded' })
+      expect(browser.current(session)).toMatchObject({ binding: { scope: secondScope } })
+    } finally { lease.release() }
+  })
+
+  it('rejects duplicate ownership and prevents an old release from clearing a new lease', async () => {
+    const session = Session.create(SessionId('relay-director'))
+    beginRelay(session)
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) })
+    const first = claimHostDirectorBinding(session, 'relay-1', port)
+    expect(() => claimHostDirectorBinding(session, 'relay-1', port)).toThrow(/owner|lease|relay/i)
+    first.release()
+    const second = claimHostDirectorBinding(session, 'relay-1', port)
+    try {
+      first.release()
+      expect(hasHostDirectorOwner(session)).toBe(true)
+      await expect(first.enter(firstScope)).rejects.toThrow(/owner|lease|relay/i)
+      expect(await second.enter(firstScope)).toMatchObject({ status: 'current' })
+    } finally { second.release() }
+  })
+
+  it('keeps an invalidated Host lease closed until explicit release and reacquisition', async () => {
+    const session = Session.create(SessionId('relay-invalidated'))
+    const state = beginRelay(session)
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) },
+      { ok: true, context: context(firstScope, sha('a')) })
+    const lease = claimHostDirectorBinding(session, 'relay-1', port)
+    try {
+      await lease.enter(firstScope)
+      invalidateHostDirectorBinding(session)
+      appendRelayState(session, { ...state, revision: 2, mode: 'paused' }, 1)
+      appendRelayState(session, { ...state, revision: 3, mode: 'running' }, 2)
+      await expect(lease.enter(firstScope)).rejects.toThrow(/lease/i)
+      await expect(refreshNativeDirectorBinding(session, port)).rejects.toThrow(/lease/i)
+      await expect(withHostDirectorOperation(session, async () => 'unexpected')).rejects.toThrow(/lease/i)
+      await expect(withHostDirectorStream(session, async function* () { yield 'unexpected' }).next()).rejects.toThrow(/lease/i)
+      expect(() => assertNativePromptSelection(session, {
+        schema: 'qingmu.native-director-request.v1', sessionId: session.id,
+        ownerId: 'relay-1', scope: firstScope, contextSnapshotSha256: sha('a'),
+      })).toThrow(/previous shot selection/i)
+      expect(port.calls).toEqual([firstScope])
+      expect(hasHostDirectorOwner(session)).toBe(true)
+      expect(() => claimHostDirectorBinding(session, 'relay-1', port)).toThrow(/lease/i)
+      lease.release()
+      const next = claimHostDirectorBinding(session, 'relay-1', port)
+      try {
+        expect(await next.enter(firstScope)).toMatchObject({ status: 'current' })
+      } finally { next.release() }
+    } finally { lease.release() }
+  })
+
+  it('retains an invalidated Host lease until its released operation settles', async () => {
+    const session = Session.create(SessionId('relay-invalidated-busy'))
+    beginRelay(session)
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) })
+    const lease = claimHostDirectorBinding(session, 'relay-1', port)
+    await lease.enter(firstScope)
+    const waiting = deferred<undefined>()
+    const operation = withHostDirectorOperation(session, () => waiting.promise)
+    try {
+      invalidateHostDirectorBinding(session)
+      lease.release()
+      expect(hasHostDirectorOwner(session)).toBe(true)
+      expect(() => claimHostDirectorBinding(session, 'relay-1', port)).toThrow(/lease/i)
+    } finally {
+      waiting.resolve(undefined)
+      await operation
+      lease.release()
+    }
+    expect(hasHostDirectorOwner(session)).toBe(false)
+    const next = claimHostDirectorBinding(session, 'relay-1', port)
+    next.release()
+  })
+
+  it('does not publish a pending browser read after a relay intent is logged', async () => {
+    const session = Session.create(SessionId('relay-director'))
+    const waiting = deferred<DirectorContextReadResult>()
+    const browser = createDirectorContextBridge({ readDirectorContext: () => waiting.promise })
+    const old = browser.enter(session, firstScope, undefined, 'old-browser')
+    beginRelay(session)
+    waiting.resolve({ ok: true, context: context(firstScope, sha('a')) })
+    expect(await old).toMatchObject({ status: 'superseded' })
+    expect(browser.current(session)).toBeNull()
+  })
+
+  it.each(['paused', 'released'] as const)('does not publish a Host read after it is %s', async (action) => {
+    const session = Session.create(SessionId('relay-director'))
+    const state = beginRelay(session)
+    const waiting = deferred<DirectorContextReadResult>()
+    const port = { readDirectorContext: () => waiting.promise }
+    const lease = claimHostDirectorBinding(session, 'relay-1', port)
+    const pending = lease.enter(firstScope)
+    if (action === 'paused') appendRelayState(session, { ...state, revision: 2, mode: 'paused' }, 1)
+    else lease.release()
+    try {
+      waiting.resolve({ ok: true, context: context(firstScope, sha('a')) })
+      expect(await pending).toMatchObject({ status: 'superseded' })
+      expect(createDirectorContextBridge(port).current(session)).toBeNull()
+      await expect(lease.enter(firstScope)).rejects.toThrow(/relay/i)
+    } finally { lease.release() }
+  })
+
+  it.each([false, true])('retains the lease until an asynchronous operation settles (reject=%s)', async (reject) => {
+    const session = Session.create(SessionId('relay-director'))
+    beginRelay(session)
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) })
+    const lease = claimHostDirectorBinding(session, 'relay-1', port)
+    await lease.enter(firstScope)
+    const waiting = deferred<undefined>()
+    const operation = withHostDirectorOperation(session, async () => {
+      await waiting.promise
+      if (reject) throw new Error('operation failed')
+      return 'saved'
+    })
+    await expect(lease.enter(secondScope)).rejects.toThrow(/operation|busy/i)
+    lease.release()
+    expect(() => claimHostDirectorBinding(session, 'relay-1', port)).toThrow(/lease/i)
+    waiting.resolve(undefined)
+    if (reject) await expect(operation).rejects.toThrow('operation failed')
+    else expect(await operation).toBe('saved')
+    expect(hasHostDirectorOwner(session)).toBe(false)
+    const next = claimHostDirectorBinding(session, 'relay-1', port)
+    next.release()
+    expect(port.calls).toEqual([firstScope])
+  })
+
+  it.each(['complete', 'return', 'throw'] as const)('retains the lease through stream cleanup on %s', async (outcome) => {
+    const session = Session.create(SessionId('relay-stream'))
+    beginRelay(session)
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) })
+    const lease = claimHostDirectorBinding(session, 'relay-1', port)
+    await lease.enter(firstScope)
+    const cleaning = deferred<undefined>()
+    const settled = deferred<undefined>()
+    const stream = withHostDirectorStream(session, async function* () {
+      try {
+        yield 'first'
+        if (outcome === 'throw') throw new Error('stream failed')
+      } finally {
+        cleaning.resolve(undefined)
+        await settled.promise
+      }
+    })[Symbol.asyncIterator]()
+    expect(await stream.next()).toEqual({ value: 'first', done: false })
+    await expect(lease.enter(secondScope)).rejects.toThrow(/operation|busy/i)
+    lease.release()
+    expect(() => claimHostDirectorBinding(session, 'relay-1', port)).toThrow(/lease/i)
+    const finish = outcome === 'return' ? stream.return!(undefined) : stream.next()
+    const checked = outcome === 'throw'
+      ? expect(finish).rejects.toThrow('stream failed')
+      : expect(finish).resolves.toMatchObject({ done: true })
+    await cleaning.promise
+    expect(hasHostDirectorOwner(session)).toBe(true)
+    expect(() => claimHostDirectorBinding(session, 'relay-1', port)).toThrow(/lease/i)
+    settled.resolve(undefined)
+    await checked
+    expect(hasHostDirectorOwner(session)).toBe(false)
+    const successor = claimHostDirectorBinding(session, 'relay-1', port)
+    successor.release()
+  })
+
+  it('loads the required relay event through JSONL and keeps the cold session closed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'qingmu-relay-cold-'))
+    const first = new Context()
+    const second = new Context()
+    try {
+      await first.plugin(SessionStore)
+      await first.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+      const session = first.sessions.create(SessionId('relay-cold'), { meta: { cwd: root } })
+      const original = beginRelay(session)
+      expect(await first.sessions.flush(session)).toBe(true)
+      await first.fiber.dispose()
+      await second.plugin(SessionStore)
+      await second.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+      const loaded = await second.sessionPersistence.load(session.id)
+      const restored = Session.create(session.id, loaded.events)
+      expect(readRelayState(restored)).toEqual(original)
+      const port = queuedPort()
+      await expect(refreshNativeDirectorBinding(restored, port)).rejects.toThrow(/relay/i)
+      expect(port.calls).toEqual([])
+    } finally {
+      await first.fiber.dispose()
+      await second.fiber.dispose()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('returns closed batches to browser ownership only after Host cleanup and release', async () => {
+    const session = Session.create(SessionId('relay-closed'))
+    const state = beginRelay(session)
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) },
+      { ok: true, context: context(secondScope, sha('b')) })
+    const lease = claimHostDirectorBinding(session, 'relay-1', port)
+    const browser = createDirectorContextBridge(port)
+    await lease.enter(firstScope)
+    const waiting = deferred<undefined>()
+    const operation = withHostDirectorOperation(session, () => waiting.promise)
+    try {
+      appendRelayState(session, { ...state, revision: 2, mode: 'closed',
+        items: state.items.map(item => ({ ...item, phase: 'abandoned' })) }, 1)
+      await expect(browser.enter(session, secondScope, undefined, 'browser')).rejects.toThrow(/relay/i)
+      lease.release()
+      await expect(browser.enter(session, secondScope, undefined, 'browser')).rejects.toThrow(/relay/i)
+      expect(() => claimHostDirectorBinding(session, 'relay-1', port)).toThrow(/lease/i)
+      expect(port.calls).toEqual([firstScope])
+    } finally {
+      waiting.resolve(undefined)
+      await operation
+      lease.release()
+    }
+    expect(() => claimHostDirectorBinding(session, 'relay-1', port)).toThrow(/lease/i)
+    expect(await browser.enter(session, secondScope, undefined, 'browser')).toMatchObject({ status: 'current' })
+    expect(hasBrowserDirectorOwner(session)).toBe(true)
+  })
+
+  it('keeps replayed unfinished work closed without a live Host owner', async () => {
+    const session = Session.create(SessionId('relay-director'))
+    beginRelay(session)
+    const restored = Session.create(session.id, structuredClone(session.events))
+    const port = queuedPort()
+    const browser = createDirectorContextBridge(port)
+    expect(hasHostDirectorOwner(restored)).toBe(false)
+    await expect(browser.enter(restored, firstScope, undefined, 'browser')).rejects.toThrow(/relay/i)
+    await expect(refreshNativeDirectorBinding(restored, port)).rejects.toThrow(/relay/i)
+    expect(() => claimHostDirectorBinding(restored, 'another-batch', port)).toThrow(/relay/i)
+    expect(port.calls).toHaveLength(0)
+  })
+})
 
 describe('Qingmu director context bridge', () => {
   it('binds one session to exact project, episode, scene, shot and context SHA coordinates', async () => {

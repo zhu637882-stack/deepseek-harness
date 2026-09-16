@@ -44,7 +44,7 @@ export function apply(ctx: Context): void {
       const method = host.get('qingmuImagoMethod')
       return createDirectorContextRpcHandler(host.sessions, port,
         prompt && method ? { prompt, method } : undefined,
-        session => readNativeDirectorReadiness(host, session))(endpoint, payload, signal)
+        session => readNativeDirectorReadiness(host, session), prompt)(endpoint, payload, signal)
     }
     host.connection.rpc.handle('/qingmu-director-context', handler, {
       authority: 'loopback',

@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { CallId, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as ModelTools from '../src/model-tools.ts'
@@ -16,7 +16,7 @@ afterEach(async () => { for (const ctx of contexts.splice(0)) await ctx.fiber.di
 
 async function harness() {
   const ctx = new Context(); contexts.push(ctx)
-  await ctx.plugin(SystemPrompt); await ctx.plugin(ToolRuntime)
+  await ctx.plugin(SystemPrompt); await ctx.plugin(SessionStore); await ctx.plugin(ToolRuntime)
   const current = { context: structuredClone(draftContext), prompt: structuredClone(draftPrompt),
     bootstrap: structuredClone(firstDraftBootstrap) as import('@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types').YimengPromptIrBootstrapResponse,
     methodSuffix: '', fail: false, wait: async () => {} }
