@@ -1158,7 +1158,7 @@ export function ScenePlanningWorkspace({
         scopeKey={JSON.stringify(directorScope)} ready={nativeTarget !== undefined} target={nativeTarget} onCommitted={onCommitted} />}
       <details><summary>单镜修改连接</summary>
         {nativeDirectorSession && <p>场次创作的进度以上方“场次导演设计”为准；这里显示已保存镜头的修改连接。</p>}
-        <p role="status">{!directorScope && !canonicalStoryboard
+        <p role="status">{!directorScope && !canonicalStoryboard && !currentShotId
           ? '尚未保存分镜。先完成场次设计并保存，再选择镜头进行修改。'
           : directorSessionId === undefined
             ? '单镜修改会话尚未连接；场次创作与人工保存仍可用。'

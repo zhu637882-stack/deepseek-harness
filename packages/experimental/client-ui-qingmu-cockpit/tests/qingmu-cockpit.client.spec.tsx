@@ -1584,9 +1584,9 @@ describe('QingmuCockpit journey', () => {
     await waitFor(() => {
       expect(dialog.querySelector('[data-shot-id="frame-1"]')).toBeTruthy()
     })
-    const scopedKeys = storageWrite.mock.calls.every(([key]) =>
-      /^qingmu:cockpit:shooting-workspace:v1:project-1:episode-1:(shot|tab)$/.test(String(key)))
-    expect(scopedKeys).toBe(true)
+    const keys = storageWrite.mock.calls.map(([key]) => String(key))
+    expect(keys).toContain('qingmu:cockpit:shooting-workspace:v1:project-1:episode-1:shot')
+    expect(keys.filter(key => !key.includes('project-1:episode-1'))).toEqual([])
   })
 
   it('fails closed when the IMAGO relation method claims a project-state write', async () => {
