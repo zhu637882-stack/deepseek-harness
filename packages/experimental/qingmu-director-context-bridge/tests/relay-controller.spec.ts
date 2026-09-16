@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { MessageId, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { hasHostDirectorOwner } from '../src/bridge.ts'
 import {
   appendRelayState, createRelayState,
   type RelayStart, type RelayState,
@@ -53,6 +54,53 @@ function sessionWithStartedBatch(): { session: Session; state: RelayState } {
   return { session, state }
 }
 
+function settleItem(
+  session: Session,
+  index: number,
+  at: { admit: string; prepared: string; submitted: string; collected: string },
+): void {
+  const started = readRelayBatch(session)!
+  const item = started.items[index]!
+  const message = admissionMessage(index, item.scope)
+  admitRelayDirector(session, index, { message, contextSnapshotSha256: sha('a') }, at.admit)
+  const handoff = {
+    messageId: message.id, turn: 0, endSeq: 0, revision: 1,
+    requestSha256: sha('b'), frameSha256: sha('c'), directorSourceSha256: sha('d'), contextSnapshotSha256: sha('a'),
+  }
+  const admitted = readRelayBatch(session)!
+  appendRelayState(session, {
+    ...admitted, revision: admitted.revision + 1, updatedAt: at.prepared,
+    items: admitted.items.map((other, offset) => offset === index
+      ? { ...other, phase: 'prepared' as const, handoff, preparedAt: at.prepared }
+      : other),
+  }, admitted.revision)
+  const submission = {
+    projectId: item.scope.projectId, frameId: item.scope.shotId, requestId: `request_${index}_00000000`,
+    expectedRevision: 1, expectedRequestSha256: sha('b'), quoteSha256: sha('e'),
+    authorizationCapCny: '0.100000', paidConfirmed: true as const,
+  }
+  const prepared = readRelayBatch(session)!
+  appendRelayState(session, {
+    ...prepared, revision: prepared.revision + 1, updatedAt: at.submitted,
+    items: prepared.items.map((other, offset) => offset === index
+      ? { ...other, phase: 'submitting' as const, submission, submittedAt: at.submitted }
+      : other),
+  }, prepared.revision)
+  const submitted = readRelayBatch(session)!
+  appendRelayState(session, {
+    ...submitted, revision: submitted.revision + 1, updatedAt: at.collected,
+    items: submitted.items.map((other, offset) => offset === index
+      ? {
+        ...other,
+        phase: 'collected' as const,
+        run: { runId: `refvideo_${submission.requestId}`, taskId: `task-${index}`, publicStatus: 'succeeded' as const },
+        settledAt: at.collected,
+        collectedAt: at.collected,
+      }
+      : other),
+  }, submitted.revision)
+}
+
 describe('readRelayBatch', () => {
   it('should return null when no relay event exists', () => {
     const session = Session.create(SessionId('relay-session'))
@@ -89,10 +137,11 @@ describe('startRelayBatch', () => {
 
   it('should allow replacing a completed batch', () => {
     const session = Session.create(SessionId('relay-session'))
-    const { state, lease } = startRelayBatch(session, startInput(), now, dummyPort())
+    const { state } = startRelayBatch(session, startInput(), now, dummyPort())
     expect(state.mode).toBe('running')
+    expect(hasHostDirectorOwner(session)).toBe(true)
     closeRelayBatch(session, 'done', later)
-    lease.release()
+    expect(hasHostDirectorOwner(session)).toBe(false)
     const read = readRelayBatch(session)!
     expect(read.mode).toBe('closed')
     const second = startInput()
@@ -218,9 +267,9 @@ describe('closeRelayBatch', () => {
 
   it('should be terminal — cannot reopen after close', () => {
     const session = Session.create(SessionId('relay-session'))
-    const { lease } = startRelayBatch(session, startInput(), now, dummyPort())
+    startRelayBatch(session, startInput(), now, dummyPort())
     closeRelayBatch(session, 'expired', later)
-    lease.release()
+    expect(hasHostDirectorOwner(session)).toBe(false)
     const replacement = { ...startInput(), batchId: 'batch-2', authorization: { ...startInput().authorization, expiresAt: '2026-09-16T03:00:00.000Z' } }
     expect(() => startRelayBatch(session, replacement, '2026-09-16T02:00:00.000Z', dummyPort()))
       .not.toThrow()
@@ -228,6 +277,29 @@ describe('closeRelayBatch', () => {
 })
 
 describe('completeRelayBatch', () => {
+  it('should complete a fully settled batch, release the Host lease, and allow replacement', () => {
+    const session = Session.create(SessionId('relay-session'))
+    startRelayBatch(session, startInput(), now, dummyPort())
+    settleItem(session, 0, {
+      admit: '2026-09-16T00:01:00.000Z', prepared: '2026-09-16T00:02:00.000Z',
+      submitted: '2026-09-16T00:03:00.000Z', collected: '2026-09-16T00:04:00.000Z',
+    })
+    settleItem(session, 1, {
+      admit: '2026-09-16T00:05:00.000Z', prepared: '2026-09-16T00:06:00.000Z',
+      submitted: '2026-09-16T00:07:00.000Z', collected: '2026-09-16T00:08:00.000Z',
+    })
+    const result = completeRelayBatch(session, '2026-09-16T00:09:00.000Z')
+    expect(result.mode).toBe('completed')
+    expect(result.reason).toBeNull()
+    expect(hasHostDirectorOwner(session)).toBe(false)
+    const replacement = {
+      ...startInput(), batchId: 'batch-2',
+      authorization: { ...startInput().authorization, expiresAt: '2026-09-16T03:00:00.000Z' },
+    }
+    expect(() => startRelayBatch(session, replacement, '2026-09-16T02:00:00.000Z', dummyPort()))
+      .not.toThrow()
+  })
+
   it('should reject when items are not settled', () => {
     const { session } = sessionWithStartedBatch()
     expect(() => completeRelayBatch(session, later))

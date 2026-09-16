@@ -71,6 +71,19 @@ export function invalidateHostDirectorBinding(session: Session): void {
   if (owner) owner.invalidated = true
 }
 
+/** Release the Host lease of a terminal batch when the caller no longer holds the lease handle.
+ * In-flight operations settle before removal, matching the lease's own release semantics.
+ * @param session Leased director session.
+ * @param batchId Identity of the batch whose lease is released; a mismatch leaves the lease untouched.
+ */
+export function releaseHostDirectorBinding(session: Session, batchId: string): void {
+  const owner = hostOwners.get(session)
+  if (!owner || owner.batchId !== batchId) return
+  owner.released = true
+  if (owner.operations === 0) hostOwners.delete(session)
+  supersedePendingOperations(session)
+}
+
 /** Claim a logged relay's selection without creating a browser lease. Only a `running` or `paused`
  * batch is claimable, so an explicit resume can reacquire the Host; `completed` and `closed` are terminal
  * and return the session to browser ownership.

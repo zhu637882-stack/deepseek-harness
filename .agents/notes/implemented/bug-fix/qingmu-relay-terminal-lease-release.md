@@ -1,0 +1,7 @@
+# Relay terminal transitions release the Host lease
+
+`claimHostDirectorBinding` documents that `completed` and `closed` batches return the session to browser ownership, but nothing performed that release: `closeRelayBatch` and `completeRelayBatch` only appended the terminal ledger event, and the RPC `startRelayBatch` endpoint drops the returned lease handle. The stale `hostOwners` entry then rejected every later `claimHostDirectorBinding` on that session, so a replacement batch could not start and `recoverRelayBatch` could not re-claim — the session was stuck until process restart.
+
+Terminal controller transitions now call a new `releaseHostDirectorBinding(session, batchId)` bridge export after the terminal append. It matches the lease's own release semantics: mark the owner released, remove it once no in-flight operations remain, and supersede pending operations. A batchId mismatch leaves the lease untouched, so a live batch's lease is never released by another batch's transition.
+
+The relay RPC endpoints also had no facade-level tests. A new `relay-rpc.spec.ts` covers all seven endpoints — field validation, unknown sessions, fail-closed ledger violations — plus the full closed loop through the real handler: start, admit, close, read-back, and a handle-free replacement batch. The replacement case fails without the lease-release fix, proving the regression path; controller tests assert `hasHostDirectorOwner` returns to false on both terminal transitions and a fully settled batch completes through ledger-validated evidence appends.

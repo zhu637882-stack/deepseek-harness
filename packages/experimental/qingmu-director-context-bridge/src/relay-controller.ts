@@ -3,7 +3,7 @@
  */
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
-import { claimHostDirectorBinding } from './bridge.ts'
+import { claimHostDirectorBinding, releaseHostDirectorBinding } from './bridge.ts'
 import {
   appendRelayState, createRelayState, readRelayState, relayBatchIsOpen,
   type RelayState,
@@ -119,7 +119,7 @@ export function advanceRelayBatch(
 }
 
 /** Complete a batch where all items have terminal evidence.
- * Sets mode to 'completed'. Terminal — cannot be reopened.
+ * Sets mode to 'completed'. Terminal — cannot be reopened. Releases the Host lease.
  * @param session Session that owns the batch ledger.
  * @param now ISO timestamp for the ledger update.
  * @returns The updated validated state.
@@ -133,11 +133,13 @@ export function completeRelayBatch(
   if (!current || !relayBatchIsOpen(current)) throw new Error('No open relay batch.')
   assertAllSettled(current)
   const next: RelayState = { ...current, revision: current.revision + 1, updatedAt: now, mode: 'completed', reason: null }
-  return appendRelayState(session, next, current.revision)
+  const saved = appendRelayState(session, next, current.revision)
+  releaseHostDirectorBinding(session, current.start.batchId)
+  return saved
 }
 
 /** Close a batch that cannot continue (expired, all items abandoned, etc).
- * Sets mode to 'closed'. Terminal — cannot be reopened.
+ * Sets mode to 'closed'. Terminal — cannot be reopened. Releases the Host lease.
  * Non-settled items are abandoned; settled items retain their evidence.
  * @param session Session that owns the batch ledger.
  * @param reason Human-readable close reason stored in the ledger.
@@ -160,7 +162,9 @@ export function closeRelayBatch(
     reason,
     items: current.items.map(item => isSettled(item) ? item : { ...item, phase: 'abandoned' as const, reason }),
   }
-  return appendRelayState(session, next, current.revision)
+  const saved = appendRelayState(session, next, current.revision)
+  releaseHostDirectorBinding(session, current.start.batchId)
+  return saved
 }
 
 /** Cold recovery: re-establish Host lease from durable session state.
