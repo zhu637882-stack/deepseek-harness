@@ -21,13 +21,14 @@ import { retainNativeToolReceipt, toolValues } from './native-draft.ts'
 import { registerReferenceVideoTools } from './reference-video-tools.ts'
 import { registerDirectorPlanTools } from './director-plan-tools.ts'
 import { capsuleQueuePathFor, registerExperienceCapsuleTools } from './experience-capsule-tools.ts'
+import { capsuleActiveStorePathFor, loadActiveCapsules, renderExperienceCapsulesBlock } from './experience-capsule-store.ts'
 import { registerCameraGeometryTool } from './camera-geometry.ts'
 import type { ReferenceVisionConfig } from './reference-vision.ts'
 
 /** Opt-in native-agent consumer; the Host binding plugin remains independently usable. */
 export const name = 'qingmu-director-model-tools'
 /** Configured Host handlers own credentials, normalization and method-root selection. */
-export const inject = ['tools', 'qingmuYimengCommand', 'qingmuImagoMethod']
+export const inject = ['tools', 'systemPrompt', 'qingmuYimengCommand', 'qingmuImagoMethod']
 
 /** Bounds apply to each complete tool response, never to a silently truncated method. */
 export interface Config {
@@ -84,6 +85,18 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0) {
     throw new Error('maxOutputBytes must be a positive safe integer.')
   }
+  // Read side of the self-writeback channel: interpolate the human-approved
+  // capsules into this preset's `{{experience_capsules}}` persona placeholder.
+  // Registered in the persona's scope so it shadows any global value, and
+  // always resolves to a string so the complete persona still renders when the
+  // store is missing or empty. Read fresh each assembly so a merge reaches the
+  // next turn without restarting the director.
+  const capsuleRuntimeRoot = process.env.QINGMU_RUNTIME_ROOT ?? process.env.QINGMU_NATIVE_ROOT ?? ''
+  ctx.effect(() => ctx.systemPrompt.variable('experience_capsules', () =>
+    capsuleRuntimeRoot === ''
+      ? ''
+      : renderExperienceCapsulesBlock(loadActiveCapsules(capsuleActiveStorePathFor(capsuleRuntimeRoot)))),
+  'experienceCapsules.variable()')
   registerCameraGeometryTool(ctx, value => boundedJson(value, maxOutputBytes))
 
   async function readBoundContext(exec: ToolRunContext): Promise<{
