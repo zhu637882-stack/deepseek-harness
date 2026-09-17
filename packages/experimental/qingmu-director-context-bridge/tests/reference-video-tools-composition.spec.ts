@@ -35,9 +35,13 @@ import { takeCommentFeed } from '../../qingmu-yimeng-read-adapter/tests/take-com
 import { MockAdapter as BaseMockAdapter, textResponse, toolCallResponse, maxTokensResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as ModelTools from '../src/model-tools.ts'
 import { readNativeDirectorReadiness } from '../src/native-readiness.ts'
-import { claimHostDirectorBinding, createDirectorContextBridge } from '../src/bridge.ts'
+import { claimHostDirectorBinding, hasHostDirectorOwner, createDirectorContextBridge } from '../src/bridge.ts'
 import { readReferenceHandoff } from '../src/reference-handoff.ts'
-import { appendRelayState, createRelayState, readRelayState } from '../src/relay-state.ts'
+import { appendRelayState, createRelayState, readRelayState, reserveRelaySubmission, type RelayItem, type RelayState } from '../src/relay-state.ts'
+import { admitRelayDirector, closeRelayBatch, completeRelayBatch, recoverRelayBatch } from '../src/relay-controller.ts'
+import { driveRelayBatch, type RelayRunnerPorts } from '../src/relay-runner.ts'
+import type { DirectorContextReadPort } from '../src/types.ts'
+import type { QueueReferenceVideoRequest } from '../../qingmu-yimeng-read-adapter/src/reference-video-types.ts'
 import { createDirectorContextRpcHandler } from '../src/rpc.ts'
 import { toolValues } from '../src/native-draft.ts'
 import type { DirectorContextSnapshot } from '../../qingmu-yimeng-command-adapter/src/types.ts'
@@ -99,7 +103,19 @@ fixture = { request, response, savedDraft }, startingImagePrompt = planningShots
   const { request, response, savedDraft } = fixture
   let workingCut: Record<string, unknown> = structuredClone(initialCut)
 
-  let saved = structuredClone(savedDraft)
+  const savedByFrame = new Map<string, typeof savedDraft>([['f', structuredClone(savedDraft)]])
+  const frameDraft = (frame: string): typeof savedDraft => {
+    let state = savedByFrame.get(frame)
+    if (state === undefined) {
+      state = structuredClone(savedDraft)
+      if (frame !== state.frameId) {
+        const request = { ...state.draft.request, frameId: frame }
+        state = { ...state, frameId: frame, draft: { ...state.draft, request, requestSha256: sha(request) } }
+      }
+      savedByFrame.set(frame, state)
+    }
+    return state
+  }
   let directorSource: { sha256: string; prompt: string; generationPrompt?: string } | null = null
   let currentContext = structuredClone(context)
   let currentPlanning = structuredClone(planning)
@@ -118,6 +134,34 @@ fixture = { request, response, savedDraft }, startingImagePrompt = planningShots
   let afterSave: (() => void) | undefined
   let loseSaveResponse = false
   let unpreparedMaterials = false
+  type MockRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'quarantined'
+  const kernelFor = (status: MockRunStatus): string => ({
+    queued: 'DispatchPending', running: 'Running', succeeded: 'Succeeded', failed: 'Failed', quarantined: 'Quarantined',
+  })[status]
+  const runs = new Map<string, Record<string, unknown>>()
+  let runPosts = 0
+  let nextRunStatus: MockRunStatus = 'queued'
+  let nextRunError: string | null = null
+  let quoteEnabled = true
+  let quoteFails = false
+  let draftReadFails = false
+  let draftDropped = false
+  let runListFails = false
+  let runReadFails = false
+  let failNextRunPost = false
+  let loseNextRunResponse = false
+  const createRun = (frame: string, requestId: string, status: MockRunStatus, options: {
+    taskId?: string
+    errorCode?: string | null
+    quoteSha256?: string
+    authorizationCapCny?: string
+  } = {}) => ({
+    schema: 'jason.reference-video-run.v1', projectId: 'p', frameId: frame, runId: `refvideo_${requestId}`,
+    taskId: options.taskId ?? `task_${requestId}`, kernelStatus: kernelFor(status), publicStatus: status,
+    providerTaskId: null, errorCode: options.errorCode ?? null, draftRevision: frameDraft(frame).draft.revision,
+    quoteSha256: options.quoteSha256 ?? 'b'.repeat(64), authorizationCapCny: options.authorizationCapCny ?? '4.800000',
+    candidates: [], providerCalls: 0, selectionChanged: false,
+  })
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
     if (url.pathname.endsWith('/asset-design/layout-preview')) return Response.json({
@@ -137,7 +181,14 @@ fixture = { request, response, savedDraft }, startingImagePrompt = planningShots
       workingCut = { ...initialCut, revision:1,cuts:[{ ...command,version:1,revisionId:'cut-1',status:'NotQueued' }] }
       return Response.json(workingCut)
     }
-    if (url.pathname.endsWith('/director-inference/context')) return Response.json(currentContext)
+    if (url.pathname.endsWith('/director-inference/context')) {
+      const shotId = url.searchParams.get('shotId') ?? currentContext.shotId
+      if (shotId === currentContext.shotId) return Response.json(currentContext)
+      // A sibling shot in the same scene reuses the bound context, re-projected to the requested shot identity.
+      const { contextSnapshotSha256: _hash, ...base } = currentContext
+      const sibling = { ...base, shotId, shot: { ...base.shot, id: shotId } }
+      return Response.json({ ...sibling, contextSnapshotSha256: sha(sibling) })
+    }
     if (url.pathname.endsWith('/scene-planning')) return Response.json(currentPlanning)
     if (url.pathname.endsWith('/scene-planning/receipt')) {
       const receipt = planReceipts.get(url.searchParams.get('idempotencyKey') ?? '')
@@ -187,7 +238,10 @@ fixture = { request, response, savedDraft }, startingImagePrompt = planningShots
       return Response.json({ ...response, body, requestBodySha256: sha(body), directorSource,
         directorSourceAligned: input.directorSourceSha256 === directorSource?.sha256 })
     }
-    if (url.pathname === '/api/qingmu/projects/p/reference-video/drafts/f') {
+    const draftMatch = /^\/api\/qingmu\/projects\/p\/reference-video\/drafts\/([^/]+)$/u.exec(url.pathname)
+    if (draftMatch) {
+      const frame = draftMatch[1] ?? 'f'
+      const saved = frameDraft(frame)
       if (init?.method === 'POST') {
         if (typeof init.body !== 'string') throw new Error('Expected a JSON save body')
         const input = JSON.parse(init.body) as {
@@ -198,27 +252,133 @@ fixture = { request, response, savedDraft }, startingImagePrompt = planningShots
         if (input.expectedRevision !== saved.draft.revision || input.expectedFrameSha256 !== saved.frameSha256) {
           return Response.json({ detail: { code: 'reference_video_draft_revision_conflict' } }, { status: 409 })
         }
-        saved = { ...saved,
+        savedByFrame.set(frame, { ...saved,
           mediaTypes: Object.fromEntries(input.request.bindings.map(binding =>
             [binding.bindingToken, saved.mediaTypes[binding.bindingToken as keyof typeof saved.mediaTypes]])) as typeof saved.mediaTypes,
           draft: { ...saved.draft, revision: saved.draft.revision + 1,
-            request: input.request, requestSha256: sha(input.request) } }
+            request: input.request, requestSha256: sha(input.request) } })
         afterSave?.()
         if (loseSaveResponse) throw new Error('connection lost after commit')
-      } else afterDraftRead?.()
-      return Response.json({ ...saved, directorSource })
+      } else {
+        if (draftReadFails) return Response.json({ detail: { code: 'reference_video_draft_unavailable' } }, { status: 503 })
+        afterDraftRead?.()
+      }
+      const current = frameDraft(frame)
+      return Response.json({ ...current, directorSource, draft: draftDropped ? null : current.draft })
+    }
+    if (url.pathname.endsWith('/quote')) {
+      if (quoteFails) return Response.json({ detail: { code: 'reference_video_quote_unavailable' } }, { status: 503 })
+      if (typeof init?.body !== 'string') throw new Error('Expected a JSON quote body')
+      const frame = /\/drafts\/([^/]+)\/quote$/u.exec(url.pathname)?.[1] ?? 'f'
+      const saved = frameDraft(frame)
+      const input = JSON.parse(init.body) as { expectedRevision: number; expectedRequestSha256: string }
+      if (input.expectedRevision !== saved.draft.revision || input.expectedRequestSha256 !== saved.draft.requestSha256) {
+        return Response.json({ detail: { code: 'reference_video_draft_revision_conflict' } }, { status: 409 })
+      }
+      const draftRequest = saved.draft.request
+      const prompt = draftRequest.promptParts.map(part => 'text' in part ? part.text
+        : response.referenceMapping.find(item => item.bindingToken === part.bindingToken)!.alias).join('')
+      const previewBody = { ...response.body, input: { ...response.body.input, prompt },
+        parameters: { ...draftRequest.parameters, watermark: false } }
+      const preview = { ...response, frameId: frame, body: previewBody, requestBodySha256: sha(previewBody), directorSource,
+        directorSourceAligned: draftRequest.directorSourceSha256 === directorSource?.sha256 }
+      const cost = { provider: 'dashscope', region: 'cn-beijing', currency: 'CNY', basis: 'catalog_list_price',
+        unit: 'second', unitPriceCny: '0.600000', billableSeconds: draftRequest.parameters.duration,
+        estimatedCny: (0.6 * draftRequest.parameters.duration).toFixed(6), candidateCount: 1, maxAttempts: 1,
+        accountDiscountApplied: false, pricingSha256: 'a'.repeat(64), pricingCheckedAt: '2026-08-24',
+        sourceUrl: 'https://help.aliyun.com/zh/model-studio/model-pricing' }
+      const projection = { projectId: 'p', frameId: frame, draftRevision: saved.draft.revision,
+        draftRequestSha256: saved.draft.requestSha256, sourceSha256: response.sourceSha256, cost,
+        generationSubmissionEnabled: quoteEnabled }
+      return Response.json({ schema: 'jason.reference-video-quote.v1', ...projection, quoteSha256: sha(projection),
+        preview, readOnly: true, providerCalls: 0, databaseWrites: 0, budgetReservedCny: 0, generationQueued: false })
+    }
+    const runsMatch = /^\/api\/qingmu\/projects\/p\/reference-video\/drafts\/([^/]+)\/runs$/u.exec(url.pathname)
+    if (runsMatch) {
+      const frame = runsMatch[1] ?? 'f'
+      const saved = frameDraft(frame)
+      if (init?.method === 'POST') {
+        runPosts++
+        if (failNextRunPost) {
+          failNextRunPost = false
+          return Response.json({ detail: { code: 'reference_video_queue_unavailable' } }, { status: 503 })
+        }
+        if (typeof init.body !== 'string') throw new Error('Expected a JSON run body')
+        const input = JSON.parse(init.body) as {
+          requestId: string
+          expectedRevision: number
+          expectedRequestSha256: string
+          quoteSha256: string
+          authorizationCapCny: string
+          paidConfirmed: boolean
+        }
+        const runId = `refvideo_${input.requestId}`
+        const existing = runs.get(runId)
+        if (existing) return Response.json(existing)
+        if (input.expectedRevision !== saved.draft.revision || input.expectedRequestSha256 !== saved.draft.requestSha256) {
+          return Response.json({ detail: { code: 'reference_video_draft_revision_conflict' } }, { status: 409 })
+        }
+        const run = createRun(frame, input.requestId, nextRunStatus, { errorCode: nextRunError,
+          quoteSha256: input.quoteSha256, authorizationCapCny: input.authorizationCapCny })
+        runs.set(runId, run)
+        if (loseNextRunResponse) {
+          loseNextRunResponse = false
+          throw new Error('connection lost after queue')
+        }
+        return Response.json(run)
+      }
+      if (runListFails) return Response.json({ detail: { code: 'reference_video_runs_unavailable' } }, { status: 503 })
+      return Response.json({ schema: 'jason.reference-video-runs.v1', projectId: 'p', frameId: frame,
+        items: [...runs.values()], providerCalls: 0 })
+    }
+    const runMatch = /\/runs\/(refvideo_[A-Za-z0-9_-]+)$/u.exec(url.pathname)
+    if (runMatch) {
+      if (runReadFails) return Response.json({ detail: { code: 'reference_video_run_unavailable' } }, { status: 503 })
+      const run = runs.get(runMatch[1] ?? '')
+      return run
+        ? Response.json(run)
+        : Response.json({ detail: { code: 'reference_video_run_not_found' } }, { status: 404 })
     }
     throw new Error(`Unexpected Writer request: ${url}`)
   })
   const read = createYimengReadHandler({}, { fetch, readToken: () => 'test-only' })
   const command = createYimengCommandHandler({}, { fetch, readToken: () => 'test-only', readYimeng: read })
-  return { fetch, read, command, inputReceipt, saved: () => saved, director: () => currentPlanning.frameRequirements[0]!.directorPlan,
+  return { fetch, read, command, inputReceipt, saved: () => frameDraft('f'), director: () => currentPlanning.frameRequirements[0]!.directorPlan,
     planReceipt: () => sha({ scope, context: currentContext, planning: currentPlanning }),
     setDirectorSource: (value: typeof directorSource) => { directorSource = value },
     afterDraftRead: (callback: () => void) => { afterDraftRead = callback },
     afterSave: (callback: () => void) => { afterSave = callback },
     unpreparedMaterials: () => { unpreparedMaterials = true },
-    loseSaveResponse: () => { loseSaveResponse = true } }
+    loseSaveResponse: () => { loseSaveResponse = true },
+    runs: () => [...runs.values()],
+    runPosts: () => runPosts,
+    injectRun: (requestId: string, status: MockRunStatus = 'queued', options: {
+      taskId?: string
+      errorCode?: string | null
+      quoteSha256?: string
+      authorizationCapCny?: string
+    } = {}) => {
+      const run = createRun('f', requestId, status, options)
+      runs.set(`refvideo_${requestId}`, run)
+      return run
+    },
+    advanceRuns: (status: MockRunStatus, errorCode: string | null = null) => {
+      for (const run of runs.values()) {
+        run.publicStatus = status
+        run.kernelStatus = kernelFor(status)
+        run.errorCode = errorCode
+      }
+    },
+    corruptRunTaskIds: () => { for (const run of runs.values()) run.taskId = `corrupt_${String(run.taskId)}` },
+    setNextRun: (status: MockRunStatus, errorCode: string | null = null) => { nextRunStatus = status; nextRunError = errorCode },
+    failNextRunPost: () => { failNextRunPost = true },
+    loseNextRunResponse: () => { loseNextRunResponse = true },
+    disableQuote: () => { quoteEnabled = false },
+    failQuote: (on = true) => { quoteFails = on },
+    failDraftRead: (on = true) => { draftReadFails = on },
+    dropDraft: (on = true) => { draftDropped = on },
+    failRunList: (on = true) => { runListFails = on },
+    failRunRead: (on = true) => { runReadFails = on } }
 }
 
 function referenceWriter() {
@@ -1627,6 +1787,13 @@ describe('Host relay execution', () => {
       toolCallResponse('relay-save', 'qingmu_save_reference_draft', referenceSaveArgs),
       textResponse('本镜执行稿已保存，未生成。'),
     ])
+  }
+
+  function relayTurnsAdapter(turns: number) {
+    return new MockAdapter(Array.from({ length: turns }, (_, index) => [
+      toolCallResponse(`relay-save-${index}`, 'qingmu_save_reference_draft', referenceSaveArgs),
+      textResponse(`镜头${index + 1}执行稿已保存，未生成。`),
+    ]).flat())
   }
 
   async function relayHarness(persist = true, adapter = respondingAdapter(), options: {
@@ -3112,6 +3279,873 @@ describe('Host relay execution', () => {
     const stored = await reader.sessionPersistence.load(h.agent.session.id)
     expect(readRelayState(stored)).toEqual(h.admitted)
     expectNoEffects(h)
+  })
+
+  describe('Host relay runner', () => {
+    const runnerRequestId = 'runner-request-0000'
+    const secondScope = { ...scope, shotId: 'other-0' }
+    const driveSignal = new AbortController().signal
+    type StubAgent = Parameters<typeof driveRelayBatch>[0]
+    type SeedOutcome = 'preparing' | 'prepared' | 'submitting' | 'queued' | 'succeeded' | 'failed' | 'collected' | 'abandoned' | 'blocked'
+
+    function stubAgent(session: Session, extra: Partial<Omit<StubAgent, 'session'>> = {}): StubAgent {
+      return {
+        session, status: 'idle', whenIdle: async () => {},
+        followup: () => { throw new Error('A stopped batch must not start another director turn') },
+        ...extra,
+      }
+    }
+
+    function runnerPorts(h: Awaited<ReturnType<typeof harness>>, options: {
+      context?: DirectorContextReadPort
+      flush?: (session: Session) => Promise<boolean>
+      now?: () => string
+      requestId?: () => string
+    } = {}): RelayRunnerPorts {
+      return {
+        context: options.context ?? {
+          async readDirectorContext(target, signal) {
+            const response = await h.upstream.command('readDirectorContext', target, signal ?? new AbortController().signal)
+            if (!response.ok) return { ok: false, reason: 'context_unavailable' }
+            return { ok: true, context: response.value as DirectorContextSnapshot }
+          },
+        },
+        read: h.upstream.read,
+        command: h.upstream.command,
+        flush: options.flush ?? (target => h.ctx.sessions.flush(target)),
+        now: options.now ?? (() => new Date().toISOString()),
+        requestId: options.requestId ?? (() => runnerRequestId),
+      }
+    }
+
+    function neverMint(): string {
+      throw new Error('A stopped or recovered shot must replay its persisted intent, never a new request ID')
+    }
+
+    async function runnerHarness(options: {
+      shots?: number
+      adapter?: MockAdapter
+      persist?: boolean
+      maxCostCny?: string
+    } = {}) {
+      const shotCount = options.shots ?? 1
+      const adapter = options.adapter ?? respondingAdapter()
+      const h = await harness(adapter, referenceWriter())
+      let persistenceRoot: string | undefined
+      if (options.persist ?? true) {
+        persistenceRoot = await mkdtemp(join(tmpdir(), 'qingmu-relay-runner-'))
+        roots.push(persistenceRoot)
+        await h.ctx.plugin(JsonlSessionPersistence, { root: persistenceRoot, compression: 'none' })
+      }
+      const session = h.agent.session
+      const now = new Date()
+      const state = appendRelayState(session, createRelayState({
+        batchId: 'runner-batch', projectId: scope.projectId, episodeId: scope.episodeId,
+        instruction: '按当前导演设计保存本镜执行稿，然后提交本镜生成。', director,
+        shots: (shotCount > 1 ? [scope, secondScope] : [scope]).map((shotScope, index) => ({
+          scope: shotScope, label: `镜头${index + 1}`, parameters: request.parameters, retake: false,
+        })),
+        authorization: {
+          authorizationId: 'runner-authorization', paidConfirmed: true,
+          maxCostCny: options.maxCostCny ?? '10', maxCandidates: shotCount,
+          expiresAt: new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
+        },
+      }, now.toISOString()), 0)
+      return { ...h, adapter, persistenceRoot, state }
+    }
+
+    /** Craft one item's durable evidence directly, so a later shot can be seeded without touching Writer. */
+    function seedShot(h: Awaited<ReturnType<typeof runnerHarness>>, index: number, outcome: SeedOutcome,
+      requestId = runnerRequestId): RelayState {
+      const session = h.agent.session
+      const shotScope = index === 0 ? scope : secondScope
+      const at = new Date().toISOString()
+      if (outcome === 'abandoned' || outcome === 'blocked') {
+        const current = readRelayState(session) as RelayState
+        return appendRelayState(session, {
+          ...current, revision: current.revision + 1, updatedAt: at,
+          items: current.items.map((item, offset) => offset === index ? { ...item, phase: outcome } : item),
+        }, current.revision)
+      }
+      const message = createUserMessage({ source: { kind: 'user' }, content: [
+        { type: 'text', text: JSON.stringify({ schema: 'qingmu.native-director-request.v1', sessionId: session.id,
+          ownerId: 'runner-batch', scope: shotScope, contextSnapshotSha256: context.contextSnapshotSha256 }) },
+        { type: 'text', text: '按当前导演设计保存本镜执行稿，然后提交本镜生成。' },
+      ] })
+      let state = admitRelayDirector(session, index, { message, contextSnapshotSha256: context.contextSnapshotSha256 }, at)
+      if (outcome === 'preparing') return state
+      const handoff = {
+        messageId: message.id, turn: 0, endSeq: 1, revision: 2, requestSha256: sha({ seeded: requestId }),
+        frameSha256: savedDraft.frameSha256, directorSourceSha256: '4'.repeat(64),
+        contextSnapshotSha256: context.contextSnapshotSha256,
+      }
+      const patch = (change: Partial<RelayItem>): RelayState => ({
+        ...state, revision: state.revision + 1, updatedAt: at,
+        items: state.items.map((item, offset) => offset === index ? { ...item, ...change } : item),
+      })
+      state = appendRelayState(session, patch({ phase: 'prepared', preparedAt: at, handoff }), state.revision)
+      if (outcome === 'prepared') return state
+      const submission: QueueReferenceVideoRequest = {
+        projectId: shotScope.projectId, frameId: shotScope.shotId, requestId, expectedRevision: 2,
+        expectedRequestSha256: handoff.requestSha256, quoteSha256: sha({ quote: requestId }),
+        authorizationCapCny: '4.800000', paidConfirmed: true,
+      }
+      state = appendRelayState(session, patch({ phase: 'submitting', submittedAt: at, submission }), state.revision)
+      if (outcome === 'submitting') return state
+      return appendRelayState(session, patch({
+        phase: outcome,
+        run: {
+          runId: `refvideo_${requestId}`, taskId: `task_${requestId}`,
+          publicStatus: outcome === 'queued' ? 'queued' : outcome === 'failed' ? 'failed' : 'succeeded',
+        },
+        settledAt: outcome === 'collected' || outcome === 'failed' ? at : null,
+        collectedAt: outcome === 'collected' ? at : null,
+        reason: outcome === 'failed' ? 'provider_generation_failed' : null,
+      }), state.revision)
+    }
+
+    async function storedSession(h: Awaited<ReturnType<typeof runnerHarness>>) {
+      expect(await h.ctx.sessions.flush(h.agent.session)).toBe(true)
+      if (h.persistenceRoot === undefined) throw new Error('Missing runner persistence root')
+      const reader = new Context(); contexts.push(reader)
+      await reader.plugin(SessionStore)
+      await reader.plugin(JsonlSessionPersistence, { root: h.persistenceRoot, compression: 'none' })
+      return reader.sessionPersistence.load(h.agent.session.id)
+    }
+
+    function admittedRequests(h: Awaited<ReturnType<typeof harness>>) {
+      return h.agent.session.events.filter(event => event.type === 'user/message' && event.data.source.kind === 'user')
+        .map(event => event.data.content.filter(part => part.type === 'text').map(part => part.text).join('\n'))
+    }
+
+    it('drives one shot from admission through dispatch and collects the succeeded run', async () => {
+      const h = await runnerHarness()
+      const steps: string[] = []
+      const dispatched = await driveRelayBatch(h.agent, runnerPorts(h), steps, driveSignal)
+      expect(dispatched).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0 })
+      expect(steps).toEqual(['admitted:0', 'turned:0', 'prepared:0', 'reserved:0', 'dispatched:0:queued'])
+      expect(h.upstream.runPosts()).toBe(1)
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({
+        phase: 'queued', submission: { requestId: runnerRequestId }, run: { publicStatus: 'queued' },
+      })
+      h.upstream.advanceRuns('succeeded')
+      const settled = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(settled).toMatchObject({ action: 'settled' })
+      expect(settled.steps).toEqual(['run:0:succeeded', 'collected:0'])
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({
+        phase: 'collected', collectedAt: expect.any(String), run: { publicStatus: 'succeeded' },
+      })
+      const repeated = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(repeated).toMatchObject({ action: 'settled', steps: [] })
+      expect(h.upstream.runPosts(), 'A settled batch must never submit again').toBe(1)
+    })
+
+    it('prepares the next shot while the current run is in flight and submits it only after the current settles', async () => {
+      let minted = 0
+      const requestId = (): string => `runner-request-${String(minted++).padStart(4, '0')}`
+      const h = await runnerHarness({ shots: 2, adapter: relayTurnsAdapter(2) })
+      const first = await driveRelayBatch(h.agent, runnerPorts(h, { requestId }), [], driveSignal)
+      expect(first).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0 })
+      expect(first.steps).toEqual(['admitted:0', 'turned:0', 'prepared:0', 'reserved:0', 'dispatched:0:queued'])
+      expect(h.upstream.runPosts()).toBe(1)
+
+      const ahead = await driveRelayBatch(h.agent, runnerPorts(h, { requestId }), [], driveSignal)
+      expect(ahead, 'An in-flight shot keeps the drive waiting while the next one is prepared').toMatchObject({
+        action: 'waiting', reason: 'run-in-flight', index: 0,
+      })
+      expect(ahead.steps).toEqual(['admitted:1', 'turned:1', 'prepared:1'])
+      expect(readRelayState(h.agent.session)!.items[1]).toMatchObject({ phase: 'prepared', submission: null, run: null })
+      expect(h.upstream.runPosts(), 'Preparing the next shot must never reach the paid queue').toBe(1)
+
+      const steady = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(steady).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0, steps: [] })
+      expect(h.upstream.runPosts()).toBe(1)
+
+      h.upstream.advanceRuns('succeeded')
+      const settled = await driveRelayBatch(h.agent, runnerPorts(h, { requestId }), [], driveSignal)
+      expect(settled).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 1 })
+      expect(settled.steps).toEqual(['run:0:succeeded', 'collected:0', 'reserved:1', 'dispatched:1:queued'])
+      expect(h.upstream.runPosts(), 'The next shot submits only after the current one settles').toBe(2)
+      expect(readRelayState(h.agent.session)!.items[1]).toMatchObject({
+        phase: 'queued', submission: { requestId: 'runner-request-0001' }, run: { publicStatus: 'queued' },
+      })
+    })
+
+    it('keeps every admission and save on the shot its lease selected across a two-shot relay', async () => {
+      let minted = 0
+      const requestId = (): string => `runner-request-${String(minted++).padStart(4, '0')}`
+      const h = await runnerHarness({ shots: 2, adapter: relayTurnsAdapter(2) })
+      const ports = runnerPorts(h, { requestId })
+      await driveRelayBatch(h.agent, ports, [], driveSignal)
+      const ahead = await driveRelayBatch(h.agent, ports, [], driveSignal)
+      expect(ahead.steps).toEqual(['admitted:1', 'turned:1', 'prepared:1'])
+      h.upstream.advanceRuns('succeeded')
+      await driveRelayBatch(h.agent, ports, [], driveSignal)
+      h.upstream.advanceRuns('succeeded')
+      const settled = await driveRelayBatch(h.agent, ports, [], driveSignal)
+      expect(settled).toMatchObject({ action: 'settled' })
+
+      const state = readRelayState(h.agent.session) as RelayState
+      expect(state.items).toHaveLength(2)
+      for (const item of state.items) {
+        expect(item.phase).toBe('collected')
+        for (const admission of item.admissions) {
+          const first = admission.message.content[0]
+          if (first?.type !== 'text') throw new Error('Admission lost its target block.')
+          expect(JSON.parse(first.text), 'An admission must target its own ledger item, never a previous shot')
+            .toMatchObject({ schema: 'qingmu.native-director-request.v1', scope: item.scope })
+        }
+      }
+      const events = h.agent.session.events
+      const saves = events.filter(event => event.type === 'tool/call' && event.data.name === 'qingmu_save_reference_draft')
+      expect(saves).toHaveLength(2)
+      const bindingBefore = (seq: number) => events.findLast(event => event.seq < seq
+        && event.type === 'qingmu-director-context/state' && event.data !== null)?.data
+      expect(bindingBefore(saves[0]!.seq), 'The first save ran under the first shot binding').toMatchObject({ binding: { scope } })
+      expect(bindingBefore(saves[1]!.seq), 'The second save ran under the second shot binding').toMatchObject({ binding: { scope: secondScope } })
+      expect(result(h.agent, 'relay-save-0').error).toBe(false)
+      expect(result(h.agent, 'relay-save-1').error).toBe(false)
+    })
+
+    it('rejects a stale-scope request under the same lease, proving the shot guard stays live during relay turns', async () => {
+      const h = await runnerHarness({ shots: 2, adapter: respondingAdapter() })
+      const lease = claimHostDirectorBinding(h.agent.session, 'runner-batch', runnerPorts(h).context)
+      const message = createUserMessage({ source: { kind: 'user' }, content: [
+        { type: 'text', text: JSON.stringify({ schema: 'qingmu.native-director-request.v1', sessionId: h.agent.session.id,
+          ownerId: 'runner-batch', scope, contextSnapshotSha256: context.contextSnapshotSha256 }) },
+        { type: 'text', text: '按当前导演设计保存本镜执行稿，然后提交本镜生成。' },
+      ] })
+      try {
+        await lease.enter(scope, driveSignal)
+        admitRelayDirector(h.agent.session, 0, { message, contextSnapshotSha256: context.contextSnapshotSha256 },
+          new Date().toISOString())
+        // The admission still names the first shot while the binding has moved to the second:
+        // the exact precondition behind production's 'previous shot selection' rejections.
+        await lease.enter(secondScope, driveSignal)
+        h.agent.followup(message)
+        await h.agent.whenIdle()
+        const ended = h.agent.session.events.findLast(event => event.type === 'turn/end')
+        const reason = ended?.data.reason
+        if (reason?.kind !== 'error') throw new Error('A request whose admission predates the binding must fail the turn, not be misread')
+        expect(reason.error.message).toContain('previous shot selection')
+        expect(h.agent.session.events.filter(event => event.type === 'tool/call'), 'No tool may run for a stale shot').toHaveLength(0)
+        expect(h.adapter.requests, 'No model request may be sent for a stale shot').toHaveLength(0)
+        expect(saves(h.upstream), 'A rejected request must never reach the Writer').toHaveLength(0)
+
+        await lease.enter(scope, driveSignal)
+        h.agent.followup(message)
+        await h.agent.whenIdle()
+        const matching = result(h.agent, 'relay-save')
+        expect(matching.error, 'The same admission is accepted once the binding is back on its shot').toBe(false)
+        expect(saves(h.upstream)).toHaveLength(1)
+      } finally { lease.release() }
+    })
+
+    it('borrows the Host lease its start already holds instead of being rejected by it', async () => {
+      const h = await runnerHarness()
+      // The start RPC claims and holds the lease; a later drive RPC on the same session must borrow it.
+      const startLease = claimHostDirectorBinding(h.agent.session, 'runner-batch', runnerPorts(h).context)
+      try {
+        const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+        expect(report).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0 })
+        expect(report.steps).toEqual(['admitted:0', 'turned:0', 'prepared:0', 'reserved:0', 'dispatched:0:queued'])
+        expect(hasHostDirectorOwner(h.agent.session), 'A drive borrows the start lease and must not drop it').toBe(true)
+      } finally { startLease.release() }
+      expect(hasHostDirectorOwner(h.agent.session)).toBe(false)
+    })
+
+    it('stops the whole batch when the first shot\'s run fails, admitting and submitting nothing later', async () => {
+      const h = await runnerHarness({ shots: 2 })
+      h.upstream.setNextRun('failed', 'provider_generation_failed')
+      const steps: string[] = []
+      const failed = await driveRelayBatch(h.agent, runnerPorts(h), steps, driveSignal)
+      expect(failed.action, 'A failed generation must never be reported as collected').not.toBe('settled')
+      expect(failed).toMatchObject({ action: 'blocked', index: 0, reason: 'provider_generation_failed' })
+      expect(steps).toEqual(['admitted:0', 'turned:0', 'prepared:0', 'reserved:0', 'dispatched:0:failed'])
+      const state = readRelayState(h.agent.session) as RelayState
+      expect(state.items[0]).toMatchObject({
+        phase: 'failed', reason: 'provider_generation_failed', settledAt: expect.any(String),
+        submission: { requestId: runnerRequestId },
+        run: { runId: `refvideo_${runnerRequestId}`, publicStatus: 'failed' },
+      })
+      expect(state.items[1]).toMatchObject({
+        phase: 'pending', admissions: [], handoff: null, submission: null, run: null,
+      })
+      expect(h.upstream.runPosts(), 'Only the failed shot may reach the paid queue').toBe(1)
+      expect(h.upstream.runs()).toHaveLength(1)
+      expect(admittedRequests(h), 'The next shot must never receive a director request')
+        .toEqual([expect.stringContaining('"shotId":"f"')])
+      expect(() => completeRelayBatch(h.agent.session, new Date().toISOString()))
+        .toThrow('cannot complete the batch')
+    })
+
+    it('labels a failed run that carries no provider error code with its own reason', async () => {
+      const h = await runnerHarness()
+      h.upstream.setNextRun('failed')
+      const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'run_failed' })
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({
+        phase: 'failed', reason: 'run_failed', settledAt: expect.any(String),
+      })
+      expect(h.upstream.runPosts(), 'A failed run must never be resubmitted').toBe(1)
+    })
+
+    it('keeps a failed batch stopped across a repeated drive, a Host recovery and a cold reload', async () => {
+      const h = await runnerHarness({ shots: 2 })
+      h.upstream.setNextRun('failed', 'provider_generation_failed')
+      await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      const stopped = readRelayState(h.agent.session) as RelayState
+      const minted = vi.fn(neverMint)
+
+      const repeated = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: minted }), [], driveSignal)
+      expect(repeated).toMatchObject({ action: 'blocked', index: 0, reason: 'provider_generation_failed', steps: [] })
+
+      const recovered = recoverRelayBatch(h.agent.session, runnerPorts(h).context)
+      expect(recovered, 'A failed batch is still open, so recovery only re-claims the Host lease').not.toBeNull()
+      expect(recovered?.state).toEqual(stopped)
+      recovered?.lease.release()
+      const afterRecovery = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: minted }), [], driveSignal)
+      expect(afterRecovery).toMatchObject({ action: 'blocked', index: 0, reason: 'provider_generation_failed', steps: [] })
+
+      const stored = await storedSession(h)
+      expect(readRelayState(stored)).toEqual(stopped)
+      const cold = await driveRelayBatch(stubAgent(stored as unknown as Session),
+        runnerPorts(h, { requestId: minted, flush: async () => true }), [], driveSignal)
+      expect(cold).toMatchObject({ action: 'blocked', index: 0, reason: 'provider_generation_failed', steps: [] })
+      expect(readRelayState(stored), 'A stopped batch must not gain ledger revisions').toEqual(stopped)
+      expect(minted).not.toHaveBeenCalled()
+      expect(readRelayState(h.agent.session)!.items[1]).toMatchObject({ phase: 'pending', admissions: [], submission: null })
+      expect(h.upstream.runPosts(), 'No retry may reach the paid queue').toBe(1)
+    })
+
+    it('blocks on a pre-submit failure and never auto-regenerates across repeated drives', async () => {
+      const h = await runnerHarness({ shots: 2, adapter: relayTurnsAdapter(2) })
+      h.upstream.setNextRun('failed', 'known_pre_submit_failure')
+      const steps: string[] = []
+      const failed = await driveRelayBatch(h.agent, runnerPorts(h), steps, driveSignal)
+      expect(failed.action, 'A pre-submit failure must never be reported as collected').not.toBe('settled')
+      expect(failed).toMatchObject({ action: 'blocked', index: 0, reason: 'known_pre_submit_failure' })
+      expect(steps).toEqual(['admitted:0', 'turned:0', 'prepared:0', 'reserved:0', 'dispatched:0:failed'])
+      const stopped = readRelayState(h.agent.session) as RelayState
+      expect(stopped.items[0]).toMatchObject({
+        phase: 'failed', reason: 'known_pre_submit_failure',
+        submission: { requestId: runnerRequestId }, run: { publicStatus: 'failed' },
+      })
+      expect(typeof stopped.items[0]?.settledAt, 'A failed attempt must be durably settled').toBe('string')
+      expect(stopped.items[1]).toMatchObject({ phase: 'pending', admissions: [], submission: null, run: null })
+      const minted = vi.fn(neverMint)
+      const repeated = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: minted }), [], driveSignal)
+      expect(repeated).toMatchObject({ action: 'blocked', index: 0, reason: 'known_pre_submit_failure', steps: [] })
+      expect(readRelayState(h.agent.session), 'A stopped batch must not gain ledger revisions').toEqual(stopped)
+      expect(minted, 'A pre-submit failure must never mint a new request ID').not.toHaveBeenCalled()
+      expect(h.adapter.requests, 'A pre-submit failure must never auto-regenerate a director turn').toHaveLength(2)
+      expect(h.upstream.runPosts(), 'A pre-submit failure must never resubmit').toBe(1)
+    })
+
+    it.each([['5', true], ['10', false]] as const)('counts a failed attempt\'s full cap against the batch budget (max ¥%s)', async (maxCostCny, exceeded) => {
+      const h = await runnerHarness({ shots: 2, maxCostCny })
+      seedShot(h, 0, 'failed', 'runner-seed-0-0000')
+      seedShot(h, 1, 'prepared', 'runner-seed-1-0000')
+      const state = readRelayState(h.agent.session) as RelayState
+      const handoff = state.items[1]?.handoff
+      if (!handoff) throw new Error('Seeded shot lost its handoff')
+      const intent: QueueReferenceVideoRequest = {
+        projectId: secondScope.projectId, frameId: secondScope.shotId, requestId: 'runner-retry-0000',
+        expectedRevision: 2, expectedRequestSha256: handoff.requestSha256,
+        quoteSha256: sha({ quote: 'runner-retry-0000' }), authorizationCapCny: '4.800000', paidConfirmed: true,
+      }
+      const reserve = () => reserveRelaySubmission(state, 1, intent, new Date().toISOString())
+      if (exceeded) {
+        expect(reserve, 'The failed shot\'s cap is still spent, so the same budget no longer fits').toThrow('Relay cost budget exceeded')
+      } else {
+        expect(reserve().items[1]).toMatchObject({ phase: 'submitting', submission: { requestId: 'runner-retry-0000' } })
+      }
+    })
+
+    it('requires an explicit paused resume before a retry admission can be persisted', async () => {
+      const h = await runnerHarness()
+      const preparing = seedShot(h, 0, 'preparing')
+      const session = h.agent.session
+      const at = new Date().toISOString()
+      const retryMessage = createUserMessage({ source: { kind: 'user' }, content: [
+        { type: 'text', text: JSON.stringify({ schema: 'qingmu.native-director-request.v1', sessionId: session.id,
+          ownerId: 'runner-batch', scope, contextSnapshotSha256: context.contextSnapshotSha256 }) },
+        { type: 'text', text: '按当前导演设计保存本镜执行稿，然后提交本镜生成。' },
+      ] })
+      const retry = (state: RelayState): RelayState => ({
+        ...state, revision: state.revision + 1, updatedAt: at, mode: 'running',
+        items: state.items.map((item, offset) => offset === 0 ? {
+          ...item, phase: 'preparing' as const,
+          admissions: [...item.admissions, { message: retryMessage, contextSnapshotSha256: context.contextSnapshotSha256, admittedAt: at }],
+        } : item),
+      })
+      expect(() => appendRelayState(session, retry(preparing), preparing.revision),
+        'A running batch must not silently retry an admitted shot')
+        .toThrow('Relay admission retry requires explicit resume before handoff or submission')
+      const paused = appendRelayState(session, {
+        ...preparing, revision: preparing.revision + 1, updatedAt: at, mode: 'paused', reason: 'operator_paused',
+      }, preparing.revision)
+      const resumed = appendRelayState(session, retry(paused), paused.revision)
+      expect(resumed.mode).toBe('running')
+      expect(resumed.items[0]?.admissions, 'The operator\'s pause makes the retry an explicit resume').toHaveLength(2)
+      expect(preparing.items[0]?.admissions, 'The persisted first admission stays immutable').toHaveLength(1)
+    })
+
+    it('reports a batch whose last shot failed as blocked, not as fully collected', async () => {
+      const h = await runnerHarness({ shots: 2 })
+      seedShot(h, 0, 'collected', 'runner-seed-0-0000')
+      seedShot(h, 1, 'failed', 'runner-seed-1-0000')
+      const report = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(report.action).not.toBe('settled')
+      expect(report).toMatchObject({ action: 'blocked', index: 1, reason: 'provider_generation_failed', steps: [] })
+      const state = readRelayState(h.agent.session) as RelayState
+      expect(state.items[0]).toMatchObject({ phase: 'collected', run: { publicStatus: 'succeeded' } })
+      expect(state.items[1]).toMatchObject({ phase: 'failed', run: { publicStatus: 'failed' } })
+      expect(h.upstream.runPosts()).toBe(0)
+    })
+
+    it.each(['abandoned', 'blocked'] as const)('stops on a %s item that recorded no reason', async (outcome) => {
+      const h = await runnerHarness({ shots: 2 })
+      seedShot(h, 0, outcome)
+      const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: outcome, steps: [] })
+      expect(readRelayState(h.agent.session)!.items[1]).toMatchObject({ phase: 'pending', admissions: [] })
+      expect(h.upstream.runPosts()).toBe(0)
+    })
+
+    it('resumes a paused in-flight shot from its persisted run without submitting it again', async () => {
+      const h = await runnerHarness()
+      const session = h.agent.session
+      const queued = seedShot(h, 0, 'queued')
+      appendRelayState(session, {
+        ...queued, revision: queued.revision + 1, updatedAt: new Date().toISOString(),
+        mode: 'paused', reason: 'operator_paused',
+      }, queued.revision)
+      h.upstream.injectRun(runnerRequestId, 'running')
+      const report = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(report).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0 })
+      expect(report.steps).toEqual(['run:0:running'])
+      expect(h.upstream.runPosts(), 'Resuming must track the persisted run, never create a second one').toBe(0)
+      expect(readRelayState(session)!.items[0]).toMatchObject({
+        phase: 'running', submission: { requestId: runnerRequestId }, run: { publicStatus: 'running' },
+      })
+    })
+
+    it('recovers an already submitted shot by readback after a restart', async () => {
+      const h = await runnerHarness()
+      seedShot(h, 0, 'submitting')
+      h.upstream.injectRun(runnerRequestId, 'queued')
+      const report = await driveRelayBatch(stubAgent(h.agent.session), runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(report).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0 })
+      expect(report.steps).toEqual(['recovered:0:queued'])
+      expect(h.upstream.runPosts(), 'A recovered submission must not be posted twice').toBe(0)
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'queued' })
+    })
+
+    it('collects a shot whose run already succeeded before the restart', async () => {
+      const h = await runnerHarness()
+      seedShot(h, 0, 'submitting')
+      h.upstream.injectRun(runnerRequestId, 'succeeded')
+      const report = await driveRelayBatch(stubAgent(h.agent.session), runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(report).toMatchObject({ action: 'settled' })
+      expect(report.steps).toEqual(['recovered:0:succeeded', 'collected:0'])
+      expect(h.upstream.runPosts(), 'A succeeded run must never be submitted again').toBe(0)
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({
+        phase: 'collected', collectedAt: expect.any(String), run: { publicStatus: 'succeeded' },
+      })
+    })
+
+    it('collects an already succeeded shot and still stops at the failed shot behind it', async () => {
+      const h = await runnerHarness({ shots: 2 })
+      seedShot(h, 1, 'failed', 'runner-seed-1-0000')
+      seedShot(h, 0, 'succeeded')
+      const report = await driveRelayBatch(stubAgent(h.agent.session),
+        runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 1, reason: 'provider_generation_failed' })
+      expect(report.steps).toEqual(['collected:0'])
+      const state = readRelayState(h.agent.session) as RelayState
+      expect(state.items[0]).toMatchObject({ phase: 'collected', collectedAt: expect.any(String) })
+      expect(state.items[1]).toMatchObject({ phase: 'failed', reason: 'provider_generation_failed' })
+      expect(h.upstream.runPosts(), 'Collecting a succeeded shot must never submit the failed one').toBe(0)
+    })
+
+    it('replays the exact persisted intent after an unconfirmed dispatch', async () => {
+      const h = await runnerHarness({ shots: 2 })
+      const requestId = vi.fn(() => runnerRequestId)
+      h.upstream.failNextRunPost()
+      const unconfirmed = await driveRelayBatch(h.agent, runnerPorts(h, { requestId }), [], driveSignal)
+      expect(unconfirmed).toMatchObject({ action: 'waiting', reason: 'dispatch-unconfirmed', index: 0 })
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({
+        phase: 'unknown', reason: expect.stringContaining('dispatch_unconfirmed'),
+        submission: { requestId: runnerRequestId }, run: null,
+      })
+      expect(readRelayState(h.agent.session)!.items[1]).toMatchObject({ phase: 'pending', admissions: [] })
+      expect(h.upstream.runs(), 'A rejected queue call must not create a run').toEqual([])
+      const replayed = await driveRelayBatch(h.agent, runnerPorts(h, { requestId }), [], driveSignal)
+      expect(replayed).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0 })
+      expect(replayed.steps).toEqual(['redispatch:0', 'dispatched:0:queued'])
+      expect(requestId, 'Readback recovery replays the persisted intent only').toHaveBeenCalledTimes(1)
+      expect(h.upstream.runs()).toHaveLength(1)
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({
+        phase: 'queued', submission: { requestId: runnerRequestId },
+      })
+    })
+
+    it('does not replay a paid dispatch while the batch is paused', async () => {
+      const h = await runnerHarness()
+      seedShot(h, 0, 'submitting')
+      const running = readRelayState(h.agent.session) as RelayState
+      appendRelayState(h.agent.session, {
+        ...running, revision: running.revision + 1, updatedAt: new Date().toISOString(), mode: 'paused',
+      }, running.revision)
+      const paused = await driveRelayBatch(stubAgent(h.agent.session), runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(paused).toMatchObject({ action: 'waiting', reason: 'batch-paused', index: 0 })
+      expect(h.upstream.runPosts(), 'A paused batch must never replay a paid dispatch').toBe(0)
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({
+        phase: 'submitting', submission: { requestId: runnerRequestId },
+      })
+    })
+
+    it('recovers a lost queue response by readback instead of submitting the shot again', async () => {
+      const h = await runnerHarness()
+      h.upstream.loseNextRunResponse()
+      const lost = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(lost).toMatchObject({ action: 'waiting', reason: 'dispatch-unconfirmed', index: 0 })
+      expect(h.upstream.runs(), 'Writer committed the run before the response was lost').toHaveLength(1)
+      const recovered = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(recovered).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0 })
+      expect(recovered.steps).toEqual(['recovered:0:queued'])
+      expect(h.upstream.runPosts(), 'A lost response must never create a second run').toBe(1)
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({
+        phase: 'queued', run: { runId: `refvideo_${runnerRequestId}`, publicStatus: 'queued' },
+      })
+    })
+
+    it('blocks before any paid call when the confirmed quote exceeds the batch budget', async () => {
+      const h = await runnerHarness({ maxCostCny: '1' })
+      const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'Relay cost budget exceeded' })
+      expect(report.steps).toEqual(['admitted:0', 'turned:0', 'prepared:0'])
+      expect(h.upstream.runPosts()).toBe(0)
+      expect(h.upstream.runs()).toEqual([])
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'blocked', submission: null })
+    })
+
+    it('waits on an unavailable quote or draft and resumes from the persisted preparation', async () => {
+      const h = await runnerHarness()
+      h.upstream.failQuote()
+      const unquoted = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(unquoted).toMatchObject({ action: 'waiting', reason: 'quote-unavailable', index: 0 })
+      expect(unquoted.steps).toEqual(['admitted:0', 'turned:0', 'prepared:0'])
+      h.upstream.failQuote(false)
+      h.upstream.failDraftRead()
+      const unread = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(unread).toMatchObject({ action: 'waiting', reason: 'draft-unavailable', index: 0, steps: [] })
+      expect(h.adapter.requests, 'Resuming from prepared must not repeat the director turn').toHaveLength(2)
+      h.upstream.failDraftRead(false)
+      const dispatched = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(dispatched).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0 })
+      expect(dispatched.steps).toEqual(['reserved:0', 'dispatched:0:queued'])
+      expect(h.upstream.runPosts()).toBe(1)
+    })
+
+    it('waits while the handoff cannot be verified and resumes when the read returns', async () => {
+      const h = await runnerHarness()
+      let contextReads = 0
+      const flaky: DirectorContextReadPort = {
+        async readDirectorContext(target, signal) {
+          if (++contextReads > 1) return { ok: false, reason: 'context_unavailable' }
+          const response = await h.upstream.command('readDirectorContext', target, signal ?? new AbortController().signal)
+          return response.ok
+            ? { ok: true, context: response.value as DirectorContextSnapshot }
+            : { ok: false, reason: 'context_unavailable' }
+        },
+      }
+      const unverified = await driveRelayBatch(h.agent, runnerPorts(h, { context: flaky }), [], driveSignal)
+      expect(unverified).toMatchObject({ action: 'waiting', reason: 'handoff-unavailable', index: 0 })
+      expect(unverified.steps).toEqual(['admitted:0', 'turned:0'])
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'preparing', handoff: null })
+      const resumed = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(resumed).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0 })
+      expect(resumed.steps).toEqual(['prepared:0', 'reserved:0', 'dispatched:0:queued'])
+      expect(h.adapter.requests, 'Verification must not repeat the director turn').toHaveLength(2)
+    })
+
+    it('blocks when the reference source moves between the two verification reads', async () => {
+      const h = await runnerHarness()
+      const original = h.upstream.fetch.getMockImplementation()!
+      let saved = false
+      h.upstream.fetch.mockImplementation(async (input, init) => {
+        const response = await original(input, init)
+        const path = new URL(input instanceof Request ? input.url : input).pathname
+        if (path.endsWith('/drafts/f') && init?.method === 'POST') saved = true
+        if (!saved || !path.endsWith('/director-inference/context')) return response
+        const { contextSnapshotSha256: _hash, ...body } = await response.json() as typeof context
+        const drifted = { ...body, script: { revision: 2, sha256: 'f'.repeat(64) } }
+        return Response.json({ ...drifted, contextSnapshotSha256: sha(drifted) })
+      })
+      const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'handoff:reference_source_changed' })
+      expect(report.steps).toEqual(['admitted:0', 'turned:0'])
+      expect(h.upstream.runPosts()).toBe(0)
+      h.upstream.fetch.mockImplementation(original)
+    })
+
+    it('blocks when the saved draft no longer matches the verified handoff', async () => {
+      const h = await runnerHarness()
+      h.upstream.failQuote()
+      await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      h.upstream.failQuote(false)
+      h.upstream.setDirectorSource({ sha256: '5'.repeat(64), prompt: '人工改动后的导演设计' })
+      const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'reference_source_changed' })
+      expect(h.upstream.runPosts()).toBe(0)
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'blocked', submission: null })
+    })
+
+    it.each(['revision', 'requestSha256', 'frameSha256'] as const)(
+      'blocks when the saved draft\'s %s drifts after the verified handoff', async (field) => {
+        const h = await runnerHarness()
+        h.upstream.failQuote()
+        await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+        h.upstream.failQuote(false)
+        const original = h.upstream.fetch.getMockImplementation()!
+        h.upstream.fetch.mockImplementation(async (input, init) => {
+          const response = await original(input, init)
+          const url = new URL(input instanceof Request ? input.url : input)
+          if (!url.pathname.endsWith('/reference-video/drafts/f') || init?.method === 'POST') return response
+          const body = await response.json() as typeof savedDraft
+          if (field === 'revision') {
+            return Response.json({ ...body, draft: { ...body.draft, revision: body.draft.revision + 1 } })
+          }
+          if (field === 'frameSha256') return Response.json({ ...body, frameSha256: '9'.repeat(64) })
+          // The adapter rejects a bare checksum swap, so the drifted draft must carry matching content and checksum.
+          const drifted = { ...body.draft.request, preparationFeedback: '人工改写的准备反馈。' }
+          return Response.json({ ...body, draft: { ...body.draft, request: drifted, requestSha256: sha(drifted) } })
+        })
+        const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+        expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'reference_source_changed' })
+        expect(report.steps).toEqual([])
+        expect(h.upstream.runPosts(), 'A drifted draft must never reach the paid queue').toBe(0)
+        expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'blocked', submission: null })
+        const repeated = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+        expect(repeated).toMatchObject({ action: 'blocked', index: 0, reason: 'reference_source_changed', steps: [] })
+        expect(h.adapter.requests, 'A stale draft forces an operator re-read, never an automatic re-prepare').toHaveLength(2)
+      })
+
+    it.each(['expectedRevision', 'expectedRequestSha256', 'frameId'] as const)(
+      'refuses a submission intent whose %s predates the verified handoff', async (field) => {
+        const h = await runnerHarness()
+        seedShot(h, 0, 'prepared', 'runner-seed-0-0000')
+        const state = readRelayState(h.agent.session) as RelayState
+        const handoff = state.items[0]?.handoff
+        if (!handoff) throw new Error('Seeded shot lost its handoff')
+        const exact: QueueReferenceVideoRequest = {
+          projectId: scope.projectId, frameId: scope.shotId, requestId: 'runner-stale-0000',
+          expectedRevision: handoff.revision, expectedRequestSha256: handoff.requestSha256,
+          quoteSha256: sha({ quote: 'runner-stale-0000' }), authorizationCapCny: '4.800000', paidConfirmed: true,
+        }
+        const stale: QueueReferenceVideoRequest = { ...exact,
+          ...(field === 'expectedRevision' ? { expectedRevision: handoff.revision - 1 } : {}),
+          ...(field === 'expectedRequestSha256' ? { expectedRequestSha256: sha({ stale: field }) } : {}),
+          ...(field === 'frameId' ? { frameId: secondScope.shotId } : {}) }
+        const now = new Date().toISOString()
+        expect(() => reserveRelaySubmission(state, 0, stale, now),
+          'A stale intent must be rejected before any paid call')
+          .toThrow('Submission must match item scope and handoff revision/request SHA')
+        expect(reserveRelaySubmission(state, 0, exact, now).items[0])
+          .toMatchObject({ phase: 'submitting', submission: { requestId: 'runner-stale-0000' } })
+      })
+
+    it('blocks when the quote disables generation submission', async () => {
+      const h = await runnerHarness({ shots: 2 })
+      h.upstream.disableQuote()
+      const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'generation_submission_disabled' })
+      expect(h.upstream.runPosts(), 'A disabled quote must not reach the paid queue').toBe(0)
+      const state = readRelayState(h.agent.session) as RelayState
+      expect(state.items[0]).toMatchObject({ phase: 'blocked', submission: null })
+      expect(state.items[1], 'A blocked shot must never admit the next one').toMatchObject({ phase: 'pending', admissions: [] })
+    })
+
+    it('blocks when the tracked run identity changes upstream', async () => {
+      const h = await runnerHarness()
+      await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      h.upstream.corruptRunTaskIds()
+      const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'run_identity_changed' })
+      expect(h.upstream.runPosts()).toBe(1)
+    })
+
+    it('waits while the run read is unavailable and stops when it reports a failure', async () => {
+      const h = await runnerHarness()
+      await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      const unchanged = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(unchanged).toMatchObject({ action: 'waiting', reason: 'run-in-flight', index: 0, steps: [] })
+      h.upstream.failRunRead()
+      const unread = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(unread).toMatchObject({ action: 'waiting', reason: 'run-read-unavailable', index: 0, steps: [] })
+      h.upstream.failRunRead(false)
+      h.upstream.advanceRuns('failed', 'provider_generation_failed')
+      const failed = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(failed).toMatchObject({ action: 'blocked', index: 0, reason: 'provider_generation_failed' })
+      expect(failed.steps).toEqual(['run:0:failed'])
+      expect(h.upstream.runPosts(), 'A failed run must not be resubmitted').toBe(1)
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'failed' })
+    })
+
+    it('waits while the run list is unavailable during an unconfirmed dispatch', async () => {
+      const h = await runnerHarness()
+      h.upstream.failNextRunPost()
+      await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      h.upstream.failRunList()
+      const report = await driveRelayBatch(h.agent, runnerPorts(h, { requestId: neverMint }), [], driveSignal)
+      expect(report).toMatchObject({ action: 'waiting', reason: 'run-list-unavailable', index: 0, steps: [] })
+      expect(h.upstream.runPosts(), 'An unreadable run list must not trigger another dispatch').toBe(1)
+    })
+
+    it.each([['dispatch', 'dispatched:0:quarantined'], ['readback', 'recovered:0:quarantined'],
+      ['poll', 'run:0:quarantined']] as const)('blocks on a run quarantined at %s', async (stage, step) => {
+      const h = await runnerHarness()
+      if (stage === 'dispatch') h.upstream.setNextRun('quarantined', 'provider_policy')
+      if (stage === 'readback') {
+        seedShot(h, 0, 'submitting')
+        h.upstream.injectRun(runnerRequestId, 'quarantined', { errorCode: 'provider_policy' })
+      }
+      if (stage === 'poll') await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      if (stage === 'poll') h.upstream.advanceRuns('quarantined', 'provider_policy')
+      const report = await driveRelayBatch(h.agent,
+        runnerPorts(h, stage === 'dispatch' ? {} : { requestId: neverMint }), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'run_quarantined:provider_policy' })
+      expect(report.steps).toEqual(stage === 'dispatch'
+        ? ['admitted:0', 'turned:0', 'prepared:0', 'reserved:0', step] : [step])
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'blocked' })
+    })
+
+    it.each(['dispatch', 'readback', 'poll'] as const)(
+      'records a run quarantined at %s without a provider code as an unknown quarantine', async (stage) => {
+        const h = await runnerHarness()
+        if (stage === 'dispatch') h.upstream.setNextRun('quarantined')
+        if (stage === 'readback') {
+          seedShot(h, 0, 'submitting')
+          h.upstream.injectRun(runnerRequestId, 'quarantined')
+        }
+        if (stage === 'poll') {
+          await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+          h.upstream.advanceRuns('quarantined')
+        }
+        const report = await driveRelayBatch(h.agent,
+          runnerPorts(h, stage === 'dispatch' ? {} : { requestId: neverMint }), [], driveSignal)
+        expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'run_quarantined:unknown' })
+        expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({
+          phase: 'blocked', reason: 'run_quarantined:unknown',
+        })
+        expect(h.upstream.runPosts(), 'A quarantined run must never be resubmitted')
+          .toBe(stage === 'readback' ? 0 : 1)
+      })
+
+    it('blocks when the director turn ends without saving the execution draft', async () => {
+      const h = await runnerHarness({ adapter: new MockAdapter([textResponse('本轮没有保存执行稿。')]) })
+      const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'handoff:reference_save_missing' })
+      expect(report.steps).toEqual(['admitted:0', 'turned:0'])
+      expect(h.upstream.runPosts()).toBe(0)
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'blocked', submission: null })
+      const repeated = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(repeated).toMatchObject({ action: 'blocked', index: 0, reason: 'handoff:reference_save_missing', steps: [] })
+    })
+
+    it('blocks when a turn ends without consuming the admitted request', async () => {
+      const h = await runnerHarness()
+      seedShot(h, 0, 'preparing')
+      const report = await driveRelayBatch(stubAgent(h.agent.session, { followup: () => {} }),
+        runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'director_turn_unconsumed', steps: ['turned:0'] })
+      expect(admittedRequests(h), 'An unconsumed admission must never be retried as a new request').toEqual([])
+      expect(h.adapter.requests).toEqual([])
+      expect(h.upstream.runPosts()).toBe(0)
+    })
+
+    it('blocks when the director turn ends incomplete', async () => {
+      const h = await runnerHarness({ adapter: new MockAdapter([maxTokensResponse('本轮尚未完成，执行稿未保存。')]) })
+      const report = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'handoff:director_turn_incomplete' })
+      expect(report.steps).toEqual(['admitted:0', 'turned:0'])
+      expect(h.upstream.runPosts()).toBe(0)
+    })
+
+    it('blocks instead of restarting an admitted turn that is still open', async () => {
+      const h = await runnerHarness()
+      const preparing = seedShot(h, 0, 'preparing')
+      const admission = preparing.items[0]!.admissions[0]!
+      h.agent.session.append('turn/start', { turn: 1 })
+      h.agent.session.append('user/message', admission.message, { surfaceOp: 'append' })
+      const report = await driveRelayBatch(stubAgent(h.agent.session), runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'blocked', index: 0, reason: 'director_turn_interrupted', steps: [] })
+      expect(h.adapter.requests).toEqual([])
+      expect(h.upstream.runPosts()).toBe(0)
+    })
+
+    it('waits for a busy director agent instead of forcing a second turn', async () => {
+      const h = await runnerHarness()
+      seedShot(h, 0, 'preparing')
+      const report = await driveRelayBatch(stubAgent(h.agent.session, { status: 'running' }), runnerPorts(h), [], driveSignal)
+      expect(report).toMatchObject({ action: 'waiting', reason: 'agent-busy', index: 0, steps: [] })
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'preparing' })
+    })
+
+    it('waits without admitting when the director context read fails', async () => {
+      const h = await runnerHarness()
+      const report = await driveRelayBatch(h.agent, runnerPorts(h, {
+        context: { readDirectorContext: async () => ({ ok: false, reason: 'context_unavailable' }) },
+      }), [], driveSignal)
+      expect(report).toMatchObject({ action: 'waiting', reason: 'context-unavailable', index: 0, steps: [] })
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'pending', admissions: [] })
+      expect(admittedRequests(h)).toEqual([])
+      expect(h.upstream.runPosts()).toBe(0)
+    })
+
+    it('reports an expired authorization without touching the batch', async () => {
+      const h = await runnerHarness()
+      const report = await driveRelayBatch(h.agent, runnerPorts(h, {
+        now: () => new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      }), [], driveSignal)
+      expect(report).toMatchObject({ action: 'expired', reason: 'authorization-expired', steps: [] })
+      expect(readRelayState(h.agent.session)!.items[0]).toMatchObject({ phase: 'pending', admissions: [] })
+      expect(admittedRequests(h)).toEqual([])
+      expect(h.upstream.runPosts()).toBe(0)
+    })
+
+    it('reports idle before any batch and after the batch is closed', async () => {
+      const bare = await harness(respondingAdapter(), referenceWriter())
+      expect(await driveRelayBatch(bare.agent, runnerPorts(bare), [], driveSignal))
+        .toMatchObject({ action: 'idle', state: null, steps: [] })
+      const h = await runnerHarness()
+      closeRelayBatch(h.agent.session, 'operator closed before submission', new Date().toISOString())
+      const closed = await driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal)
+      expect(closed).toMatchObject({ action: 'idle', steps: [] })
+      expect(closed.state).toMatchObject({ mode: 'closed', items: [{ phase: 'abandoned' }] })
+      expect(h.upstream.runPosts()).toBe(0)
+    })
+
+    it('refuses to start the director turn when the admission does not persist', async () => {
+      const h = await runnerHarness({ persist: false })
+      await expect(driveRelayBatch(h.agent, runnerPorts(h), [], driveSignal))
+        .rejects.toThrow('Relay admission must persist before its turn.')
+      expect(h.adapter.requests, 'An unpersisted admission must not reach the model').toEqual([])
+      expect(h.upstream.runPosts()).toBe(0)
+    })
+
+    it('refuses to continue when a ledger append does not persist', async () => {
+      const h = await runnerHarness()
+      let flushed = 0
+      const ports = runnerPorts(h, {
+        flush: async (target) => { if (++flushed > 1) return false; return h.ctx.sessions.flush(target) },
+      })
+      await expect(driveRelayBatch(h.agent, ports, [], driveSignal))
+        .rejects.toThrow('Relay ledger must persist before its effects.')
+      expect(h.upstream.runPosts(), 'An unpersisted preparation must not reach the paid queue').toBe(0)
+    })
   })
 })
 

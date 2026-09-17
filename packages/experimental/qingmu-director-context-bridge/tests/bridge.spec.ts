@@ -10,8 +10,9 @@ import type {
   DirectorReplayProposal,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { createDirectorContextBridge } from '../src/index.ts'
-import { claimHostDirectorBinding, hasHostDirectorOwner, hasBrowserDirectorOwner, invalidateHostDirectorBinding,
-  assertNativePromptSelection, refreshNativeDirectorBinding, withHostDirectorOperation, withHostDirectorStream } from '../src/bridge.ts'
+import { claimHostDirectorBinding, borrowHostDirectorBinding, hasHostDirectorOwner, hasBrowserDirectorOwner,
+  invalidateHostDirectorBinding, assertNativePromptSelection, refreshNativeDirectorBinding,
+  withHostDirectorOperation, withHostDirectorStream } from '../src/bridge.ts'
 import { appendRelayState, createRelayState, readRelayState } from '../src/relay-state.ts'
 import type {
   DirectorContextReadPort,
@@ -174,6 +175,57 @@ describe('Host relay director binding', () => {
     } finally { second.release() }
   })
 
+  it('reuses the start Host lease for a drive and keeps it after the borrowed release', async () => {
+    const session = Session.create(SessionId('relay-director'))
+    beginRelay(session)
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) },
+      { ok: true, context: context(firstScope, sha('a')) })
+    const start = claimHostDirectorBinding(session, 'relay-1', port)
+    try {
+      const drive = borrowHostDirectorBinding(session, 'relay-1', port)
+      expect(hasHostDirectorOwner(session)).toBe(true)
+      expect(await drive.enter(firstScope)).toMatchObject({ status: 'current' })
+      drive.release()
+      expect(hasHostDirectorOwner(session), 'A drive must not drop the lease its batch start holds').toBe(true)
+      const second = borrowHostDirectorBinding(session, 'relay-1', port)
+      expect(await second.enter(firstScope)).toMatchObject({ status: 'current' })
+      second.release()
+      expect(hasHostDirectorOwner(session)).toBe(true)
+    } finally { start.release() }
+    expect(hasHostDirectorOwner(session)).toBe(false)
+  })
+
+  it('cold-claims a Host lease when a drive runs without a held start lease', async () => {
+    const session = Session.create(SessionId('relay-director'))
+    beginRelay(session)
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) })
+    expect(hasHostDirectorOwner(session)).toBe(false)
+    const drive = borrowHostDirectorBinding(session, 'relay-1', port)
+    expect(hasHostDirectorOwner(session)).toBe(true)
+    expect(await drive.enter(firstScope)).toMatchObject({ status: 'current' })
+    drive.release()
+    expect(hasHostDirectorOwner(session), 'A cold-claimed drive lease is released when the drive ends').toBe(false)
+  })
+
+  it('rejects borrowing an invalidated Host lease until it is explicitly released', async () => {
+    const session = Session.create(SessionId('relay-director'))
+    beginRelay(session)
+    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) },
+      { ok: true, context: context(firstScope, sha('a')) })
+    const start = claimHostDirectorBinding(session, 'relay-1', port)
+    try {
+      await start.enter(firstScope)
+      invalidateHostDirectorBinding(session)
+      expect(() => borrowHostDirectorBinding(session, 'relay-1', port)).toThrow(/lease/i)
+      expect(hasHostDirectorOwner(session)).toBe(true)
+    } finally { start.release() }
+    expect(hasHostDirectorOwner(session)).toBe(false)
+    const recovered = borrowHostDirectorBinding(session, 'relay-1', port)
+    try {
+      expect(await recovered.enter(firstScope)).toMatchObject({ status: 'current' })
+    } finally { recovered.release() }
+  })
+
   it('keeps an invalidated Host lease closed until explicit release and reacquisition', async () => {
     const session = Session.create(SessionId('relay-invalidated'))
     const state = beginRelay(session)
@@ -238,20 +290,39 @@ describe('Host relay director binding', () => {
     expect(browser.current(session)).toBeNull()
   })
 
-  it.each(['paused', 'released'] as const)('does not publish a Host read after it is %s', async (action) => {
+  it('does not publish a Host read after its lease is released', async () => {
+    const session = Session.create(SessionId('relay-director'))
+    beginRelay(session)
+    const waiting = deferred<DirectorContextReadResult>()
+    const port = { readDirectorContext: () => waiting.promise }
+    const lease = claimHostDirectorBinding(session, 'relay-1', port)
+    const pending = lease.enter(firstScope)
+    lease.release()
+    try {
+      waiting.resolve({ ok: true, context: context(firstScope, sha('a')) })
+      expect(await pending).toMatchObject({ status: 'superseded' })
+      expect(createDirectorContextBridge(port).current(session)).toBeNull()
+      await expect(lease.enter(firstScope)).rejects.toThrow(/relay/i)
+    } finally { lease.release() }
+  })
+
+  it('publishes a zero-authority selection read while paused but still blocks execution', async () => {
     const session = Session.create(SessionId('relay-director'))
     const state = beginRelay(session)
     const waiting = deferred<DirectorContextReadResult>()
     const port = { readDirectorContext: () => waiting.promise }
     const lease = claimHostDirectorBinding(session, 'relay-1', port)
     const pending = lease.enter(firstScope)
-    if (action === 'paused') appendRelayState(session, { ...state, revision: 2, mode: 'paused' }, 1)
-    else lease.release()
+    appendRelayState(session, { ...state, revision: 2, mode: 'paused' }, 1)
     try {
       waiting.resolve({ ok: true, context: context(firstScope, sha('a')) })
-      expect(await pending).toMatchObject({ status: 'superseded' })
-      expect(createDirectorContextBridge(port).current(session)).toBeNull()
-      await expect(lease.enter(firstScope)).rejects.toThrow(/relay/i)
+      // A paused batch stays enterable so the driver can select the shot before admitting it back to running.
+      expect(await pending).toMatchObject({ status: 'current', state: { binding: { scope: firstScope } } })
+      expect(createDirectorContextBridge(port).current(session)).toMatchObject({ binding: { scope: firstScope } })
+      expect(await lease.enter(firstScope)).toMatchObject({ status: 'current' })
+      // Execution still requires a running batch, so a paused lease admits no paid or write effect.
+      await expect(withHostDirectorOperation(session, async () => 'unexpected')).rejects.toThrow(/lease/i)
+      await expect(withHostDirectorStream(session, async function* () { yield 'unexpected' }).next()).rejects.toThrow(/lease/i)
     } finally { lease.release() }
   })
 

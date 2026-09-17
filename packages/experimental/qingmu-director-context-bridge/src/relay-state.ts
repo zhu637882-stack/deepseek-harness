@@ -170,7 +170,11 @@ export function relayBatchIsOpen(state: RelayState): boolean {
   return state.mode !== 'completed' && state.mode !== 'closed'
 }
 
-function isSettled(item: RelayItem): boolean {
+/** Whether the item carries authoritative terminal run evidence.
+ * @param item Ledger item to classify.
+ * @returns True only when the collected or failed phase matches its immutable run status.
+ */
+export function isSettled(item: RelayItem): boolean {
   return (item.phase === 'collected' && item.run?.publicStatus === 'succeeded')
     || (item.phase === 'failed' && item.run?.publicStatus === 'failed')
 }
