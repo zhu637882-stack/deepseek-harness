@@ -40,6 +40,7 @@ import { NativeDirectorSession } from './NativeDirectorSession.tsx'
 import { projectDirectorSessionId } from './native-director-session.ts'
 import { ShootingReviewWorkspace } from './ShootingReviewWorkspace.tsx'
 import { StoryboardHumanReview } from './StoryboardHumanReview.tsx'
+import { AssetReferenceAudit } from './AssetReferenceAudit.tsx'
 import { QingmuApplicationFrame, creativeStepFromSearch, creativeStepLabel, type CreativeStep } from './QingmuApplicationFrame.tsx'
 
 export type QingmuCockpitProps = PropsRuntime<'root'>
@@ -689,6 +690,12 @@ export function QingmuCockpit({
             )
           })}</ul>}
       </Card>
+      {episodeId !== '' && <AssetReferenceAudit
+        key={`${projectId}:${episodeId}:asset-audit`}
+        projectId={projectId}
+        episodeId={episodeId}
+        t={t}
+      />}
     </div>
   )
 

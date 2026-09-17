@@ -98,6 +98,7 @@ declare module '@deepseek-ai/cordis' {
 import { prepareShotFindingCommand } from './shot-finding.ts'
 import { registerEntityDraftReviewCommands } from './entity-draft-review.ts'
 import { registerStoryboardHumanReviewCommands } from './storyboard-human-review.ts'
+import { registerAssetReferenceAuditCommands } from './asset-reference-audit.ts'
 import { registerFirstFrameSelectionCommands } from './first-frame-selection.ts'
 import { registerNativeVideoReview } from './native-video-review.ts'
 import { registerCreationStylePreview } from './creation-style-preview.ts'
@@ -110,6 +111,10 @@ export {
   registerStoryboardHumanReviewCommands,
   type StoryboardHumanReviewCommandDependencies,
 } from './storyboard-human-review.ts'
+export {
+  registerAssetReferenceAuditCommands,
+  type AssetReferenceAuditCommandDependencies,
+} from './asset-reference-audit.ts'
 import { prepareTakeVersionCommand } from './take-version.ts'
 import { prepareTakeCommentCommand } from './take-comment.ts'
 import { prepareTakeReviewCommand } from './take-review-authority.ts'
@@ -6369,6 +6374,10 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
     fetch: globalThis.fetch,
   }), 'qingmu-yimeng-command: storyboard human review commands')
+  ctx.effect(() => registerAssetReferenceAuditCommands(ctx.webServer, {
+    baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
+    fetch: globalThis.fetch,
+  }), 'qingmu-yimeng-command: asset reference audit commands')
   ctx.effect(() => registerFirstFrameSelectionCommands(ctx.webServer, {
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
     fetch: globalThis.fetch,
