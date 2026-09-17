@@ -3414,8 +3414,10 @@ describe('Host relay execution', () => {
     }
 
     function admittedRequests(h: Awaited<ReturnType<typeof harness>>) {
-      return h.agent.session.events.filter(event => event.type === 'user/message' && event.data.source.kind === 'user')
-        .map(event => event.data.content.filter(part => part.type === 'text').map(part => part.text).join('\n'))
+      return h.agent.session.events.flatMap((event) => {
+        if (event.type !== 'user/message' || event.data.source.kind !== 'user') return []
+        return [event.data.content.flatMap(part => (part.type === 'text' ? [part.text] : [])).join('\n')]
+      })
     }
 
     it('drives one shot from admission through dispatch and collects the succeeded run', async () => {
