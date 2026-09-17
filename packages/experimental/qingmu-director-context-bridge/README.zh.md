@@ -55,7 +55,7 @@ Host 批次通过 `claimHostDirectorBinding` 接管同一会话：批次开放�
 
 异步进入和恢复使用 Session 级操作代次与 binding 事件 CAS。迟到结果返回 `superseded`，不能覆盖较新的对象选择或 proposal 挂接。未绑定时的恢复、被拒绝的 proposal 挂接不会取消正在等待的进入操作。投影状态仍为可空的版本 1；产生空事件之前，须一起交付更新后的事件读取器。
 
-Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopback 的浏览器 facade。青木 bundle 在 cockpit 之前挂载它。工作区把旧规划镜头或选中的权威自动分镜绑定到同一当前会话；自动分镜绑定不会启用旧规划保存。facade 不会暴露底层 Host command handler、token、Provider payload 或 permit。
+Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopback 的浏览器 facade。青木 bundle 在 cockpit 之前挂载它。工作区把旧规划镜头或选中的权威自动分镜绑定到同一当前会话；自动分镜绑定不会启用旧规划保存。facade 不会暴露底层 Host command handler、token、Provider payload 或 permit。胶囊人审路由通过软 `webServer` inject 一并注册，因此没有 Host web server 的组合仍能加载，只是不提供人审路由；硬性 `sessionProjections` 依赖不变。
 
 `readNativeDirectorReadiness({ sessionId })` 检查已附着会话的运行中 agent（智能体）与作用域工具注册表，不恢复会话或加载预设。它要求上下文/方法两个工具、四个 PromptIR 建议工具和引用草稿的读取/预览/保存三个工具齐全，返回 mounted、missing-tools、inactive 或 unavailable；记录中的预设名称和成功的镜头绑定都不能证明工具存在。结果只是某一时点的注册检查，不代表实际执行、模型可用、Writer 健康或创意批准。可选原生服务缺失时，绑定接口仍保留。
 
@@ -66,6 +66,8 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 易梦仍是唯一业务真源。绑定事件只保存对象坐标、context SHA 和不可变 proposal/freshness 哈希，不保存提示词正文、参考媒体、内容签收、选择、Ready、Provider 结果、费用记录或通用聊天历史。下述可选模型工具会把创作上下文和方法正文保存在普通工具结果事件中。绑定操作不写入易梦业务状态。可选编辑工具使用已有 Writer 命令适配器；视觉检查可派发一次已配置的辅助 LLM 调用，不派发图片或视频生成。
 
 原生创建从同一个预设目录读取 `QINGMU_CREATIVE_SKILL_ROOT`，按 `sources.json` 核对方法正文，将导演、编剧、摄影方法身份随项目保存。用 Writer 的 Python 环境运行 `examples/native-production-keyless.py /path/to/writer`，可在隔离数据库上执行实际创建路由及共享预算闸门；相邻 JSON 快照验证两个项目，不发出 Provider 请求。
+
+经验胶囊通道同样区分“模型可以写什么”与“什么能到达模型”。提交工具把胶囊追加到 runtime root 下的 `experience-capsule-queue.json`，而 `{{experience_capsules}}` 只注入 `experience-capsules-active.json` 中的条目，新→旧、上限 12 条。两个文件之间不会自行搬运：`GET /api/qingmu/experience-capsule-review` 把二者合成一份人审状态，`POST /api/qingmu/experience-capsule-review/promote` 在库锁内合并操作者勾选的精确 id，并先写 active 库再裁剪队列，因此两步之间崩溃只会留下“已入库且仍在队列”的胶囊，不会静默丢失。两个路由只应答本机 Host 上的同源浏览器，不写易梦状态、不派发 Provider 调用、不动预算；未配置 runtime root 的部署返回 503，驾驶舱面板则完全不渲染。
 
 ## 原生导演读取工具
 
@@ -160,6 +162,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 - 使用相同 Writer/Core 路径，设置 `QINGMU_FULL_HOST_BROWSER=1` 并通过 Vitest 运行 `tests/native-first-draft-host.spec.ts`，验证随包完整 Host 和构建客户端。它使用真实服务和脚本化模型输出，覆盖原生传输、采用/编辑/保存/Ready/刷新及旧对象拒绝。runtime 和驾驶舱工件在一次性目录构建，与实际服务字节核对，共享安装包不改动。合成 Ready 选择不是人工内容签收、生产启用、真实模型创作质量或生成。
 - 旧回放建议仍由 `checkDirectorProposalFreshness` 检查漂移；原生提示词建议使用其已记录的读取回执和只读接口。
 - 原生工具不启用真实 DeepSeek 路由、费用或生产 canary；可选的专属素材连接只允许显式 DashScope 临时上传。
+- 胶囊晋升路由要求请求形如操作者本人的浏览器会话——无 `authorization` 头、`origin` 与 Host 一致、带格式正确的 `jason_token` cookie——但从不向 Writer 的会话存储校验该 cookie，只有登录代理能做这件事。同机进程若同时伪造这两项即可通过；而它本来就能直接写这两个胶囊文件。该栅栏拦住的是其他源站页面和普通工具调用，拦不住有意为之的本机调用者。
 
 loopback `/qingmu-director-context` RPC 与驾驶舱接力面板已端到端驱动批次：`driveRelayBatch` 在一把已接管的 Host 租约下运行准入-准备-预留-派发-收片循环，start、advance、recover、complete 与 close 也一并接入。当某镜的运行仅在途时，驱动会准入并准备下一镜直到其交接，但绝不为它预留或派发，因此该镜只在当前运行落定后才进入付费队列。付费派发因此同时只保持一笔未结算提交；跨镜并行付费生成与线上生产启用仍延后。
 

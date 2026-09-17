@@ -45,12 +45,37 @@ export interface MergeResult {
 /**
  * Newest-first cap on the injected block. Bounds the persona tail so the model
  * input stays small and the cache prefix moves only when the store changes.
+ * Approved capsules past this count stay stored but are not injected.
  */
-const DEFAULT_RENDER_LIMIT = 12
+export const ACTIVE_CAPSULE_RENDER_LIMIT = 12
 
-/** Resolve the approved-capsule store next to the runtime identity and its queue. */
+/**
+ * Resolve the runtime root both capsule files live in.
+ * @returns `QINGMU_RUNTIME_ROOT`, else `QINGMU_NATIVE_ROOT`, else `''`. An empty
+ * root unmounts the director's submission tool and makes the review routes answer
+ * that the channel is unconfigured, rather than reading or writing a path built
+ * from `''`.
+ */
+export function resolveCapsuleRuntimeRoot(): string {
+  return process.env.QINGMU_RUNTIME_ROOT ?? process.env.QINGMU_NATIVE_ROOT ?? ''
+}
+
+/**
+ * Resolve the approved-capsule store next to the runtime identity and its queue.
+ * @param runtimeRoot - the harness runtime root both capsule files live in.
+ * @returns the store path the persona reads and a promotion rewrites.
+ */
 export function capsuleActiveStorePathFor(runtimeRoot: string): string {
   return join(runtimeRoot, 'experience-capsules-active.json')
+}
+
+/**
+ * Resolve the director's review queue next to the runtime identity.
+ * @param runtimeRoot - the harness runtime root both capsule files live in.
+ * @returns the queue path the submission tool appends to and a promotion trims.
+ */
+export function capsuleQueuePathFor(runtimeRoot: string): string {
+  return join(runtimeRoot, 'experience-capsule-queue.json')
 }
 
 /** Accept only well-formed capsules so a hand-edited store cannot inject garbage. */
@@ -65,18 +90,12 @@ function isActiveCapsule(value: unknown): value is ActiveCapsule {
 }
 
 /**
- * Read the approved capsules in stored (newest-first) order.
- * @param storePath - the active-store path from {@link capsuleActiveStorePathFor}.
- * @returns the valid capsules; a missing or malformed store contributes none.
+ * Validate one parsed active-store document.
+ * @param raw - the parsed store file content.
+ * @returns the valid capsules in stored (newest-first) order; a document that is
+ * not `{capsules: [...]}` contributes none.
  */
-export function loadActiveCapsules(storePath: string): ActiveCapsule[] {
-  let raw: unknown
-  try {
-    raw = JSON.parse(readFileSync(storePath, 'utf8'))
-  } catch {
-    // A missing store before the first merge is the normal empty case.
-    return []
-  }
+export function parseActiveCapsules(raw: unknown): ActiveCapsule[] {
   const capsules = raw !== null && typeof raw === 'object' && !Array.isArray(raw)
     ? (raw as Record<string, unknown>).capsules
     : undefined
@@ -90,6 +109,23 @@ export function loadActiveCapsules(storePath: string): ActiveCapsule[] {
 }
 
 /**
+ * Read the approved capsules in stored (newest-first) order.
+ * @param storePath - the active-store path from {@link capsuleActiveStorePathFor}.
+ * @returns the valid capsules; a missing or malformed store contributes none, so
+ * the persona still renders when the operator has approved nothing yet.
+ */
+export function loadActiveCapsules(storePath: string): ActiveCapsule[] {
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(storePath, 'utf8'))
+  } catch {
+    // A missing store before the first merge is the normal empty case.
+    return []
+  }
+  return parseActiveCapsules(raw)
+}
+
+/**
  * Render the approved capsules as one persona block.
  * @param capsules - approved capsules, newest-first.
  * @param limit - maximum lines rendered; the rest are dropped as too old.
@@ -97,7 +133,7 @@ export function loadActiveCapsules(storePath: string): ActiveCapsule[] {
  * line; `''` when there are no capsules, so the inline persona placeholder
  * interpolates to nothing and leaves no trailing blank line.
  */
-export function renderExperienceCapsulesBlock(capsules: readonly ActiveCapsule[], limit = DEFAULT_RENDER_LIMIT): string {
+export function renderExperienceCapsulesBlock(capsules: readonly ActiveCapsule[], limit = ACTIVE_CAPSULE_RENDER_LIMIT): string {
   const lines = capsules.slice(0, Math.max(0, limit)).map((capsule) => {
     const symptom = capsule.symptom.trim()
     const rule = capsule.rule.trim()

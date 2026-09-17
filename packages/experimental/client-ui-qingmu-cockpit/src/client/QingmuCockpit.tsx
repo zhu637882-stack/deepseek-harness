@@ -41,6 +41,7 @@ import { projectDirectorSessionId } from './native-director-session.ts'
 import { ShootingReviewWorkspace } from './ShootingReviewWorkspace.tsx'
 import { StoryboardHumanReview } from './StoryboardHumanReview.tsx'
 import { AssetReferenceAudit } from './AssetReferenceAudit.tsx'
+import { ExperienceCapsuleReview } from './ExperienceCapsuleReview.tsx'
 import { QingmuApplicationFrame, creativeStepFromSearch, creativeStepLabel, type CreativeStep } from './QingmuApplicationFrame.tsx'
 
 export type QingmuCockpitProps = PropsRuntime<'root'>
@@ -918,6 +919,7 @@ export function QingmuCockpit({
       <Card title={t('handoffCardTitle')}>
         <EditorialHandoff projectId={projectId} episodeId={episodeId} port={port} t={t} />
       </Card>
+      <ExperienceCapsuleReview t={t} />
     </div>
   )
 
@@ -1011,6 +1013,8 @@ export function QingmuCockpit({
         <details className={css.stageSupporting}><summary>专业剪辑交接与审核记录</summary>
           <EditorialHandoff compact projectId={projectId} episodeId={episodeId}
             port={port} t={t} onOpenShooting={openCandidateReview} /></details></div>
+        <details className={css.stageSupporting}><summary>导演经验胶囊人审</summary>
+          <ExperienceCapsuleReview t={t} /></details>
       </div>,
     }
     return <QingmuApplicationFrame projects={projects.map(p => ({ id: stringOf(p.id) ?? '', label: projectLabel(p, '未命名项目') }))}

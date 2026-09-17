@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { capsuleQueuePathFor, registerExperienceCapsuleTools } from '../src/experience-capsule-tools.ts'
+import { capsuleQueuePathFor } from '../src/experience-capsule-store.ts'
+import { registerExperienceCapsuleTools } from '../src/experience-capsule-tools.ts'
 
 const exec = { signal: new AbortController().signal, session: undefined, callId: 'call-1' }
 

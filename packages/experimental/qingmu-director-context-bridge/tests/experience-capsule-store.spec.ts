@@ -1,12 +1,14 @@
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   capsuleActiveStorePathFor,
+  capsuleQueuePathFor,
   loadActiveCapsules,
   mergeApprovedCapsules,
   renderExperienceCapsulesBlock,
+  resolveCapsuleRuntimeRoot,
   type ActiveCapsule,
   type QueuedCapsule,
 } from '../src/experience-capsule-store.ts'
@@ -99,5 +101,24 @@ describe('mergeApprovedCapsules', () => {
     expect(result.merged).toEqual([])
     expect(result.active).toEqual(active)
     expect(result.remainingQueue).toEqual(queue)
+  })
+})
+
+describe('capsule file resolution', () => {
+  afterEach(() => { vi.unstubAllEnvs() })
+
+  it('puts both capsule files directly in the runtime root', () => {
+    expect(capsuleQueuePathFor('/runtime')).toBe(join('/runtime', 'experience-capsule-queue.json'))
+    expect(capsuleActiveStorePathFor('/runtime')).toBe(join('/runtime', 'experience-capsules-active.json'))
+  })
+
+  it('prefers the runtime root and reports an unconfigured channel as empty', () => {
+    vi.stubEnv('QINGMU_RUNTIME_ROOT', '/runtime')
+    vi.stubEnv('QINGMU_NATIVE_ROOT', '/native')
+    expect(resolveCapsuleRuntimeRoot()).toBe('/runtime')
+    vi.stubEnv('QINGMU_RUNTIME_ROOT', undefined)
+    expect(resolveCapsuleRuntimeRoot()).toBe('/native')
+    vi.stubEnv('QINGMU_NATIVE_ROOT', undefined)
+    expect(resolveCapsuleRuntimeRoot()).toBe('')
   })
 })

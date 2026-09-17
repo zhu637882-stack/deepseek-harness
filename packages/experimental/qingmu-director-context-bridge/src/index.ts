@@ -11,8 +11,11 @@ import { createDirectorContextRpcHandler } from './rpc.ts'
 import { readNativeDirectorReadiness } from './native-readiness.ts'
 import { readRelayState } from './relay-state.ts'
 import { driveRelayBatch, type RelayDriveReport } from './relay-runner.ts'
+import { registerExperienceCapsuleReviewRoutes } from './experience-capsule-review.ts'
+import { resolveCapsuleRuntimeRoot } from './experience-capsule-store.ts'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 
 export { createDirectorContextBridge } from './bridge.ts'
 export { createDirectorContextRpcHandler } from './rpc.ts'
@@ -42,6 +45,14 @@ export function apply(ctx: Context): void {
   ctx.sessionProjections.register(directorContextBindingProjectionDefinition)
   ctx.sessionProjections.register(nativeDialogueProjection)
   ctx.sessionProjections.register(relayStateProjectionDefinition)
+  // The operator's capsule review is a Host concern, so it waits for the web
+  // server instead of being declared in `inject`: the same package is mounted in
+  // the director preset scope, where there is no browser to serve.
+  ctx.inject(['webServer'], (host) => {
+    host.effect(() => registerExperienceCapsuleReviewRoutes(host.webServer, {
+      runtimeRoot: resolveCapsuleRuntimeRoot(),
+    }), 'qingmu-director-context: experience capsule review routes')
+  })
   ctx.inject(['connection', 'sessions', 'qingmuYimengCommand'], (host) => {
     const port = {
       readDirectorContext: async (scope: import('./types.ts').DirectorObjectScope, signal?: AbortSignal) => {

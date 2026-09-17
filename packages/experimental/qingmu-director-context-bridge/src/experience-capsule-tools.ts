@@ -1,25 +1,19 @@
 /** Self-writeback experience channel: the director submits lesson capsules to a review queue. */
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
+import { CAPSULE_ID, loadQueuedCapsules, withCapsuleStoreLock, writeCapsuleFile } from './experience-capsule-files.ts'
+import type { QueuedCapsule } from './experience-capsule-store.ts'
 import { assertNativeTurnTarget } from './native-prompt-target.ts'
 
 /** Capsules older than this are pruned so the queue cannot grow unbounded. */
 const MAX_QUEUE_DAYS = 30
 
-interface CapsuleDraft {
-  id: string
-  symptom: string
-  rule: string
-  submittedAt: string
-  sessionId?: string
-}
+type CapsuleDraft = QueuedCapsule & { readonly submittedAt: string }
 
-function isValidCapsule(value: unknown): value is Omit<CapsuleDraft, 'submittedAt' | 'sessionId'> {
+function isValidCapsule(value: unknown): value is Pick<CapsuleDraft, 'id' | 'symptom' | 'rule'> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const draft = value as Record<string, unknown>
-  return typeof draft.id === 'string' && /^[A-Za-z0-9_-]{3,32}$/u.test(draft.id)
+  return typeof draft.id === 'string' && CAPSULE_ID.test(draft.id)
     && typeof draft.symptom === 'string' && draft.symptom.trim().length > 0 && draft.symptom.length <= 400
     && typeof draft.rule === 'string' && draft.rule.trim().length > 0 && draft.rule.length <= 400
 }
@@ -27,8 +21,12 @@ function isValidCapsule(value: unknown): value is Omit<CapsuleDraft, 'submittedA
 /**
  * Register the capsule-submission tool. The director calls it after finishing a
  * real assignment to record a lesson it can act on itself next time. Drafts land
- * in a JSON queue file under the runtime root; nothing enters the injection
- * layer until a human reviews and merges them into experience_capsules.json.
+ * in the review queue under the runtime root; nothing enters the injection layer
+ * until an operator promotes them into the active store, which the review routes
+ * in `experience-capsule-review.ts` do on one human decision.
+ * @param ctx - the director's agent or preset scope, so the tool is only visible
+ * to the session that can learn from its own work.
+ * @param capsuleQueuePath - queue path from `capsuleQueuePathFor`.
  */
 export function registerExperienceCapsuleTools(ctx: Context, capsuleQueuePath: string): void {
   const output = { schema: { type: 'json' as const }, render: (_args: unknown, value: unknown) => [{ type: 'text' as const, text: JSON.stringify(value) }] }
@@ -51,23 +49,14 @@ export function registerExperienceCapsuleTools(ctx: Context, capsuleQueuePath: s
         submittedAt: new Date().toISOString(),
         ...(typeof exec.agent?.session?.id === 'string' ? { sessionId: exec.agent.session.id } : {}),
       }
-      await mkdir(dirname(capsuleQueuePath), { recursive: true })
-      let queue: CapsuleDraft[] = []
-      try {
-        const raw = JSON.parse(await readFile(capsuleQueuePath, 'utf8')) as unknown
-        if (Array.isArray(raw)) queue = raw.filter(isValidCapsule).map(item => ({ ...item, submittedAt: 'submittedAt' in item && typeof item.submittedAt === 'string' ? item.submittedAt : '' }))
-      } catch { /* First write starts a fresh queue. */ }
       const cutoff = Date.now() - MAX_QUEUE_DAYS * 24 * 60 * 60 * 1000
-      queue = queue.filter(item => item.submittedAt !== '' && Date.parse(item.submittedAt) >= cutoff)
-      if (queue.some(item => item.id === draft.id)) throw new Error(`Capsule ${draft.id} is already queued; choose a new id.`)
-      queue.push(draft)
-      await writeFile(capsuleQueuePath, `${JSON.stringify(queue, null, 2)}\n`, { encoding: 'utf8' })
+      await withCapsuleStoreLock(async () => {
+        const queue = loadQueuedCapsules(capsuleQueuePath)
+          .filter(entry => entry.submittedAt !== undefined && Date.parse(entry.submittedAt) >= cutoff)
+        if (queue.some(entry => entry.id === draft.id)) throw new Error(`Capsule ${draft.id} is already queued; choose a new id.`)
+        await writeCapsuleFile(capsuleQueuePath, [...queue, draft])
+      })
       return { queued: true, id: draft.id, queuePath: capsuleQueuePath, reviewRequired: true }
     },
   }))
-}
-
-/** Resolve the capsule queue path next to the runtime identity. */
-export function capsuleQueuePathFor(runtimeRoot: string): string {
-  return join(runtimeRoot, 'experience-capsule-queue.json')
 }

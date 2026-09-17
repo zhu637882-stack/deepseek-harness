@@ -22,8 +22,11 @@ import { prepareDialogueVideo } from './dialogue-video.ts'
 import { retainNativeToolReceipt, toolValues } from './native-draft.ts'
 import { registerReferenceVideoTools } from './reference-video-tools.ts'
 import { registerDirectorPlanTools } from './director-plan-tools.ts'
-import { capsuleQueuePathFor, registerExperienceCapsuleTools } from './experience-capsule-tools.ts'
-import { capsuleActiveStorePathFor, loadActiveCapsules, renderExperienceCapsulesBlock } from './experience-capsule-store.ts'
+import { registerExperienceCapsuleTools } from './experience-capsule-tools.ts'
+import {
+  capsuleActiveStorePathFor, capsuleQueuePathFor, loadActiveCapsules,
+  renderExperienceCapsulesBlock, resolveCapsuleRuntimeRoot,
+} from './experience-capsule-store.ts'
 import { registerCameraGeometryTool } from './camera-geometry.ts'
 import type { ReferenceVisionConfig } from './reference-vision.ts'
 
@@ -93,7 +96,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   // always resolves to a string so the complete persona still renders when the
   // store is missing or empty. Read fresh each assembly so a merge reaches the
   // next turn without restarting the director.
-  const capsuleRuntimeRoot = process.env.QINGMU_RUNTIME_ROOT ?? process.env.QINGMU_NATIVE_ROOT ?? ''
+  const capsuleRuntimeRoot = resolveCapsuleRuntimeRoot()
   ctx.effect(() => ctx.systemPrompt.variable('experience_capsules', () =>
     capsuleRuntimeRoot === ''
       ? ''
@@ -211,7 +214,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     registerReferenceVideoTools(draftHost, { readBoundContext, boundedJson: value => boundedJson(value, maxOutputBytes),
       ...(config.referenceVision ? { referenceVision: config.referenceVision } : {}) })
     registerDirectorPlanTools(draftHost, { readBoundContext, boundedJson: value => boundedJson(value, maxOutputBytes) })
-    const runtimeRoot = process.env.QINGMU_RUNTIME_ROOT ?? process.env.QINGMU_NATIVE_ROOT ?? ''
+    const runtimeRoot = resolveCapsuleRuntimeRoot()
     if (runtimeRoot) registerExperienceCapsuleTools(draftHost, capsuleQueuePathFor(runtimeRoot))
     async function readDialogueInput(exec: ToolRunContext) {
       const current = await readBoundContext(exec)
