@@ -57,6 +57,11 @@ export {
   registerEntityDraftReviewRead,
   type EntityDraftReviewReadDependencies,
 } from './entity-draft-review.ts'
+import { registerStoryboardHumanReviewRead } from './storyboard-human-review.ts'
+export {
+  registerStoryboardHumanReviewRead,
+  type StoryboardHumanReviewReadDependencies,
+} from './storyboard-human-review.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -5520,6 +5525,10 @@ export function apply(ctx: Context, config: YimengReadAdapterConfig = {}): void 
     baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
     fetch: dependencies.fetch,
   }), 'qingmu-yimeng-read: entity draft human review state')
+  ctx.effect(() => registerStoryboardHumanReviewRead(ctx.webServer, {
+    baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),
+    fetch: dependencies.fetch,
+  }), 'qingmu-yimeng-read: storyboard human review state')
   if (authorizer !== undefined) {
     ctx.effect(() => registerEditorialHandoffDownload(ctx.webServer, {
       baseUrl: resolveBaseUrl(config.baseUrl ?? DEFAULT_BASE_URL),

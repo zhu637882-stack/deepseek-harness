@@ -39,6 +39,7 @@ import { DirectorWorkspace } from './DirectorWorkspace.tsx'
 import { NativeDirectorSession } from './NativeDirectorSession.tsx'
 import { projectDirectorSessionId } from './native-director-session.ts'
 import { ShootingReviewWorkspace } from './ShootingReviewWorkspace.tsx'
+import { StoryboardHumanReview } from './StoryboardHumanReview.tsx'
 import { QingmuApplicationFrame, creativeStepFromSearch, creativeStepLabel, type CreativeStep } from './QingmuApplicationFrame.tsx'
 
 export type QingmuCockpitProps = PropsRuntime<'root'>
@@ -927,6 +928,7 @@ export function QingmuCockpit({
           nativeDirectorSession={nativeDirectorSession}
           hostSync={hostSync} t={t} onCommitted={refreshWorkflowProjectionAfterCommit} />
         : <p role="status">导演工作区等待准确项目与剧集绑定；不会自动读取空作用域。</p>}
+      {episodeId !== '' && <StoryboardHumanReview key={`storyboard-review:${episodeId}`} episodeId={episodeId} t={t} />}
     </>,
     overview,
     assets: assetView,
