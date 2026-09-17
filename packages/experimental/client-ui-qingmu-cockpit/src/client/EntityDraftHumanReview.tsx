@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { HumanSessionSignIn, jsonObject } from './human-session.tsx'
 import type { QingmuCockpitKey } from './locales.ts'
 import css from './QingmuCockpit.module.css'
 
@@ -53,17 +54,9 @@ function params(props: Props, draftId?: string): URLSearchParams {
   })
 }
 
-async function responseJson(response: Response): Promise<Record<string, unknown>> {
-  const value = await response.json() as unknown
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('invalid response')
-  return value as Record<string, unknown>
-}
-
 /** Dedicated natural-person decision surface; browser authority never enters the RPC port. */
 export function EntityDraftHumanReview(props: Props) {
   const [state, setState] = useState<DraftReviewState>()
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
   const [draftInputs, setDraftInputs] = useState<Readonly<Record<string, DraftInputState>>>({})
   const [busy, setBusy] = useState(false)
   const [needsLogin, setNeedsLogin] = useState(false)
@@ -86,7 +79,7 @@ export function EntityDraftHumanReview(props: Props) {
     if (response.status === 401) {
       setNeedsLogin(true); setState(undefined); return
     }
-    const value = await responseJson(response)
+    const value = await jsonObject(response)
     if (stale()) return
     if (!response.ok || value.schema !== 'jason.qingmu-entity-draft-human-review-state.v1') {
       throw new Error(typeof value.code === 'string' ? value.code : 'entity_draft_review_state_failed')
@@ -104,23 +97,6 @@ export function EntityDraftHumanReview(props: Props) {
     })
     return () => { controller.abort() }
   }, [props.projectId, props.episodeId, props.storyboardRevisionId, props.frameId, props.promptIrId])
-
-  const login = async (): Promise<void> => {
-    if (busy || username === '' || password === '') return
-    setBusy(true); setError(undefined)
-    try {
-      const response = await fetch('/api/qingmu/editorial-handoff/human-session', {
-        method: 'POST', cache: 'no-store', credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-      if (!response.ok) throw new Error('entity_draft_review_login_failed')
-      setPassword('')
-      await load()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally { setBusy(false) }
-  }
 
   const decide = async (draftId: string, decision: 'accepted' | 'rejected'): Promise<void> => {
     const draftInput = draftInputs[draftId]
@@ -142,7 +118,7 @@ export function EntityDraftHumanReview(props: Props) {
         setNeedsLogin(true); setState(undefined); setDraftInputs({})
         throw new Error('entity_draft_review_relogin_required')
       }
-      const value = await responseJson(response)
+      const value = await jsonObject(response)
       if (!response.ok) throw new Error(typeof value.code === 'string' ? value.code : 'entity_draft_review_failed')
       setDraftInputs((current) => {
         const { [draftId]: _completed, ...remaining } = current
@@ -157,16 +133,8 @@ export function EntityDraftHumanReview(props: Props) {
   return <section className={css.entityReview} aria-label={props.t('entityDraftReviewTitle')}>
     <h4>{props.t('entityDraftReviewTitle')}</h4>
     <p>{props.t('entityDraftReviewBoundary')}</p>
-    {needsLogin && <div className={css.entityReviewLogin}>
-      <label><span>{props.t('entityDraftReviewAccount')}</span>
-        <input aria-label={props.t('entityDraftReviewAccount')} value={username}
-          autoComplete="username" onChange={(event) => { setUsername(event.target.value) }} /></label>
-      <label><span>{props.t('entityDraftReviewPassword')}</span>
-        <input aria-label={props.t('entityDraftReviewPassword')} value={password} type="password"
-          autoComplete="current-password" onChange={(event) => { setPassword(event.target.value) }} /></label>
-      <button type="button" className={css.primaryAction} disabled={busy || username === '' || password === ''}
-        onClick={() => { void login() }}>{props.t('entityDraftReviewLogin')}</button>
-    </div>}
+    {needsLogin && <HumanSessionSignIn t={props.t} failureCode="entity_draft_review_login_failed"
+      onError={setError} onSignedIn={() => load()} />}
     {state !== undefined && <>
       <p role="status">{props.t('entityDraftReviewBound')}: {state.identity.naturalPersonId}</p>
       <p>PromptIR {state.promptIr.id} · v{state.promptIr.version} · {state.promptIr.contentSha256}</p>

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { HumanSessionSignIn, jsonObject } from './human-session.tsx'
 import type { QingmuCockpitKey } from './locales.ts'
 import css from './QingmuCockpit.module.css'
 
@@ -68,12 +69,6 @@ const AUDIT_REASONS: Readonly<Record<string, QingmuCockpitKey>> = {
 /** Codes whose prefix carries a bound column name the operator must see verbatim. */
 const BINDING_PREFIX = 'asset_reference_audit_preflight_binding_mismatch:'
 
-async function responseJson(response: Response): Promise<Record<string, unknown>> {
-  const value = await response.json() as unknown
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('invalid response')
-  return value as Record<string, unknown>
-}
-
 /**
  * Formal visual audit of the episode's existing reference images.
  *
@@ -87,8 +82,6 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
 export function AssetReferenceAudit(props: Props) {
   const [mode, setMode] = useState<AuditMode>('new_candidates')
   const [quote, setQuote] = useState<AuditQuote>()
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
   const [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [needsLogin, setNeedsLogin] = useState(false)
@@ -109,23 +102,7 @@ export function AssetReferenceAudit(props: Props) {
       method: 'POST', cache: 'no-store', credentials: 'same-origin',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     })
-    return { response, value: await responseJson(response) }
-  }
-
-  const login = async (): Promise<void> => {
-    if (busy || username === '' || password === '') return
-    setBusy(true); setError(undefined)
-    try {
-      const response = await fetch('/api/qingmu/editorial-handoff/human-session', {
-        method: 'POST', cache: 'no-store', credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-      if (!response.ok) throw new Error('asset_audit_login_failed')
-      setPassword(''); setNeedsLogin(false)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally { setBusy(false) }
+    return { response, value: await jsonObject(response) }
   }
 
   const explain = (reason: string): string => {
@@ -202,16 +179,8 @@ export function AssetReferenceAudit(props: Props) {
   return <section className={css.entityReview} aria-label={props.t('assetAuditTitle')}>
     <h4>{props.t('assetAuditTitle')}</h4>
     <p className={css.boundary}>{props.t('assetAuditBoundary')}</p>
-    {needsLogin && <div className={css.entityReviewLogin}>
-      <label><span>{props.t('entityDraftReviewAccount')}</span>
-        <input aria-label={props.t('entityDraftReviewAccount')} value={username}
-          autoComplete="username" onChange={(event) => { setUsername(event.target.value) }} /></label>
-      <label><span>{props.t('entityDraftReviewPassword')}</span>
-        <input aria-label={props.t('entityDraftReviewPassword')} value={password} type="password"
-          autoComplete="current-password" onChange={(event) => { setPassword(event.target.value) }} /></label>
-      <button type="button" className={css.primaryAction} disabled={busy || username === '' || password === ''}
-        onClick={() => { void login() }}>{props.t('entityDraftReviewLogin')}</button>
-    </div>}
+    {needsLogin && <HumanSessionSignIn t={props.t} failureCode="asset_audit_login_failed"
+      onError={setError} onSignedIn={() => { setNeedsLogin(false) }} />}
     <div className={css.scriptActions}>
       <label className={css.rightsCheck}>
         <input type="radio" name="asset-audit-mode" checked={mode === 'new_candidates'} disabled={busy}

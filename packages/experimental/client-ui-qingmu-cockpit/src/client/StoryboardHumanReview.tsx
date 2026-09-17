@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { HumanSessionSignIn, jsonObject } from './human-session.tsx'
 import type { QingmuCockpitKey } from './locales.ts'
 import css from './QingmuCockpit.module.css'
 
@@ -59,12 +60,6 @@ const REVIEW_REASONS: Readonly<Record<string, QingmuCockpitKey>> = {
   storyboard_human_review_atomic_acceptance_failed: 'storyboardReviewReasonAcceptanceFailed',
 }
 
-async function responseJson(response: Response): Promise<Record<string, unknown>> {
-  const value = await response.json() as unknown
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('invalid response')
-  return value as Record<string, unknown>
-}
-
 /**
  * Whole-episode storyboard pre-production review gate.
  *
@@ -76,8 +71,6 @@ async function responseJson(response: Response): Promise<Record<string, unknown>
  */
 export function StoryboardHumanReview(props: Props) {
   const [state, setState] = useState<EpisodeReviewState>()
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
   const [note, setNote] = useState('')
   const [confirmed, setConfirmed] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -106,7 +99,7 @@ export function StoryboardHumanReview(props: Props) {
     if (response.status === 401) {
       setNeedsLogin(true); setState(undefined); return
     }
-    const value = await responseJson(response)
+    const value = await jsonObject(response)
     if (stale()) return
     if (!response.ok || value.version !== 'storyboard-preproduction-human-review-v1') {
       throw new Error(typeof value.code === 'string' ? value.code : 'storyboard_human_review_state_failed')
@@ -124,23 +117,6 @@ export function StoryboardHumanReview(props: Props) {
     })
     return () => { controller.abort() }
   }, [props.episodeId])
-
-  const login = async (): Promise<void> => {
-    if (busy || username === '' || password === '') return
-    setBusy(true); setError(undefined)
-    try {
-      const response = await fetch('/api/qingmu/editorial-handoff/human-session', {
-        method: 'POST', cache: 'no-store', credentials: 'same-origin',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-      if (!response.ok) throw new Error('storyboard_human_review_login_failed')
-      setPassword('')
-      await load()
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally { setBusy(false) }
-  }
 
   const explain = (reason: string): string => {
     const key = REVIEW_REASONS[reason]
@@ -179,7 +155,7 @@ export function StoryboardHumanReview(props: Props) {
         setNeedsLogin(true); setState(undefined); setNote(''); setConfirmed(false)
         throw new Error('storyboard_human_review_relogin_required')
       }
-      const value = await responseJson(response)
+      const value = await jsonObject(response)
       if (response.status === 502) {
         // Outcome unknown: keep the key and the note so a retry is an exact
         // idempotent replay, but drop the tick so nothing is accepted implicitly.
@@ -207,16 +183,8 @@ export function StoryboardHumanReview(props: Props) {
   return <section className={css.entityReview} aria-label={props.t('storyboardReviewTitle')}>
     <h4>{props.t('storyboardReviewTitle')}</h4>
     <p className={css.boundary}>{props.t('storyboardReviewBoundary')}</p>
-    {needsLogin && <div className={css.entityReviewLogin}>
-      <label><span>{props.t('entityDraftReviewAccount')}</span>
-        <input aria-label={props.t('entityDraftReviewAccount')} value={username}
-          autoComplete="username" onChange={(event) => { setUsername(event.target.value) }} /></label>
-      <label><span>{props.t('entityDraftReviewPassword')}</span>
-        <input aria-label={props.t('entityDraftReviewPassword')} value={password} type="password"
-          autoComplete="current-password" onChange={(event) => { setPassword(event.target.value) }} /></label>
-      <button type="button" className={css.primaryAction} disabled={busy || username === '' || password === ''}
-        onClick={() => { void login() }}>{props.t('entityDraftReviewLogin')}</button>
-    </div>}
+    {needsLogin && <HumanSessionSignIn t={props.t} failureCode="storyboard_human_review_login_failed"
+      onError={setError} onSignedIn={() => load()} />}
     {state === undefined && !needsLogin && error === undefined
       && <p role="status" className={css.empty}>{props.t('storyboardReviewLoading')}</p>}
     {state !== undefined && <>
