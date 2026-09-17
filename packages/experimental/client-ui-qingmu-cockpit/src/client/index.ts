@@ -216,6 +216,13 @@ export function apply(ctx: ClientContext): void {
         readonly state: import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').RelayState | null
         readonly recovered: boolean
       },
+    releaseRelayHostLease: async (sessionId, batchId, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'releaseRelayHostLease', { sessionId, batchId }, signal)) as {
+        readonly settling: boolean
+      },
+    driveRelayBatch: async (sessionId, signal) =>
+      unwrapRpc(await connection.rpc.call('/qingmu-director-context', 'driveRelayBatch', { sessionId }, signal)) as
+        import('@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types').RelayDriveReport,
   }
 
   const port: QingmuYimengPort = {

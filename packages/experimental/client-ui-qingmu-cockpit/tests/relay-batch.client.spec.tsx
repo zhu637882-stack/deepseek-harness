@@ -136,6 +136,29 @@ describe('RelayBatchPanel', () => {
     expect(recoverRelayBatch).toHaveBeenCalledWith('session-1')
   })
 
+  it('releases a dead Host lease for the current batch and points the operator to recovery', async () => {
+    const releaseRelayHostLease = vi.fn(async () => ({ settling: false }))
+    render(<RelayBatchPanel sessionId="session-1" directorBridge={bridge({
+      readRelayBatch: vi.fn(async () => runningBatch()),
+      advanceRelayBatch: vi.fn(), completeRelayBatch: vi.fn(), closeRelayBatch: vi.fn(), recoverRelayBatch: vi.fn(),
+      releaseRelayHostLease,
+    })} />)
+    fireEvent.click(await screen.findByRole('button', { name: '释放失效租约' }))
+    await waitFor(() => { expect(releaseRelayHostLease).toHaveBeenCalledWith('session-1', 'batch-1') })
+    expect(await screen.findByText('已释放失效租约，请恢复 Host 租约。')).toBeDefined()
+  })
+
+  it('tells the operator to wait while a released lease drains in-flight operations', async () => {
+    const releaseRelayHostLease = vi.fn(async () => ({ settling: true }))
+    render(<RelayBatchPanel sessionId="session-1" directorBridge={bridge({
+      readRelayBatch: vi.fn(async () => runningBatch()),
+      advanceRelayBatch: vi.fn(), completeRelayBatch: vi.fn(), closeRelayBatch: vi.fn(), recoverRelayBatch: vi.fn(),
+      releaseRelayHostLease,
+    })} />)
+    fireEvent.click(await screen.findByRole('button', { name: '释放失效租约' }))
+    expect(await screen.findByText('已标记释放失效租约，等待进行中的操作收尾后再恢复。')).toBeDefined()
+  })
+
   it('surfaces read failures as alerts', async () => {
     render(<RelayBatchPanel sessionId="session-1" directorBridge={bridge({
       readRelayBatch: vi.fn(async () => { throw new Error('rpc unavailable') }),
@@ -143,6 +166,30 @@ describe('RelayBatchPanel', () => {
     })} />)
     expect(await screen.findByRole('alert')).toBeDefined()
     expect(screen.getByText(/rpc unavailable/)).toBeDefined()
+  })
+
+  it('shows the reserved cost against the authorization cap, per item and in total', async () => {
+    const batch = runningBatch()
+    batch.items[0]!.submission = {
+      projectId: 'project-1', frameId: 'shot-1', requestId: 'req-1', expectedRevision: 1,
+      expectedRequestSha256: 'a'.repeat(64), quoteSha256: 'b'.repeat(64),
+      authorizationCapCny: '4.800000', paidConfirmed: true,
+    }
+    render(<RelayBatchPanel sessionId="session-1" directorBridge={bridge({
+      readRelayBatch: vi.fn(async () => batch),
+      advanceRelayBatch: vi.fn(), completeRelayBatch: vi.fn(), closeRelayBatch: vi.fn(), recoverRelayBatch: vi.fn(),
+    })} />)
+    expect(await screen.findByText(/已占 ¥4\.800000/)).toBeDefined()
+    expect(screen.getByText(/授权上限 ¥0\.300000/)).toBeDefined()
+    expect(screen.getByText('占用 ¥4.800000')).toBeDefined()
+  })
+
+  it('shows zero reserved cost before any submission', async () => {
+    render(<RelayBatchPanel sessionId="session-1" directorBridge={bridge({
+      readRelayBatch: vi.fn(async () => runningBatch()),
+      advanceRelayBatch: vi.fn(), completeRelayBatch: vi.fn(), closeRelayBatch: vi.fn(), recoverRelayBatch: vi.fn(),
+    })} />)
+    expect(await screen.findByText(/已占 ¥0\.000000/)).toBeDefined()
   })
 
   it('creates a batch only after instruction and explicit paid confirmation, mapping shots and authorization', async () => {

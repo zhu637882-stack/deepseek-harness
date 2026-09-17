@@ -51,7 +51,7 @@
 
 `recover` 先折叠持久 DSh 日志，再重新读取当前易梦 context。context SHA 发生变化时，自动追加新的完整绑定并清空旧 proposal。context 或模型能力不可用时，保留最后已知绑定并返回 `manualWorkAllowed: true`，不阻断普通人工编辑。
 
-Host 批次通过 `claimHostDirectorBinding` 接管同一会话：批次开放期间只能选择批次列出的镜头，且 `enter` 要求处于 `running` 模式并拥有未过期预留。`withHostDirectorOperation` 与 `withHostDirectorStream` 在 await 及异步迭代器清理期间持有租约，进行中的工作时调用 `release()` 会延后到该工作落定。终态批次把会话归还浏览器，批次开放期间浏览器的 `enter`、`clear`、`bindProposal` 与 `recover` 均被拒绝。
+Host 批次通过 `claimHostDirectorBinding` 接管同一会话：批次开放期间只能选择批次列出的镜头，并要求未过期预留。`enter`（选择读取）在批次处于 `running` 或 `paused` 时均可用；付费与写入守卫 `withHostDirectorOperation` 和 `withHostDirectorStream` 还要求 `running`，因此暂停批次只发布读取、不产生任何效果。二者都在 await 及异步迭代器清理期间持有租约，进行中的工作时调用 `release()` 会延后到该工作落定。每次 drive 复用 start 或 recovery 已持有的租约，保持批次单写者；释放借来的租约为空操作。终态批次把会话归还浏览器，批次开放期间浏览器的 `enter`、`clear`、`bindProposal` 与 `recover` 均被拒绝。
 
 异步进入和恢复使用 Session 级操作代次与 binding 事件 CAS。迟到结果返回 `superseded`，不能覆盖较新的对象选择或 proposal 挂接。未绑定时的恢复、被拒绝的 proposal 挂接不会取消正在等待的进入操作。投影状态仍为可空的版本 1；产生空事件之前，须一起交付更新后的事件读取器。
 
@@ -159,7 +159,9 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 - 旧回放建议仍由 `checkDirectorProposalFreshness` 检查漂移；原生提示词建议使用其已记录的读取回执和只读接口。
 - 原生工具不启用真实 DeepSeek 路由、费用或生产 canary；可选的专属素材连接只允许显式 DashScope 临时上传。
 
-生产里还没有任何代码创建接力状态：本包拥有账本、Host 租约、执行门禁与由日志推导的交接读取，但没有批次控制器，也没有页面控件驱动批次，因此在后续改动接入工作区之前这些路径保持未使用。预留批次同时只允许一笔未结算提交，墙钟收益受每镜一个排队候选限制，而非受导演限制。
+loopback `/qingmu-director-context` RPC 与驾驶舱接力面板已端到端驱动批次：`driveRelayBatch` 在一把已接管的 Host 租约下运行准入-准备-预留-派发-收片循环，start、advance、recover、complete 与 close 也一并接入。当某镜的运行仅在途时，驱动会准入并准备下一镜直到其交接，但绝不为它预留或派发，因此该镜只在当前运行落定后才进入付费队列。付费派发因此同时只保持一笔未结算提交；跨镜并行付费生成与线上生产启用仍延后。
+
+`releaseRelayHostLease` 是由操作员显式触发的失效 Host 租约释放。被一次失败的持久 flush 作废的租约否则会卡死其未结批次——驱动拒绝它，恢复无法重新接管，只有关闭批次（放弃未完成镜头）才能腾出。该释放失败即拒：要求精确的未结批次身份和一个已作废或已释放的 owner，拒绝健康或他人的租约，并等待进行中的操作收尾后才移除 owner。随后恢复即可在镜头全数保留的情况下重新接管批次。
 
 ## 整片声音执行
 

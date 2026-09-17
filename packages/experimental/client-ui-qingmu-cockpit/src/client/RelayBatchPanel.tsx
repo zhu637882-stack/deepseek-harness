@@ -14,6 +14,18 @@ const phaseLabels: Record<RelayState['items'][number]['phase'], string> = {
 }
 const ratios = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16'] as const
 const costPattern = /^\d+(?:\.\d{1,6})?$/u
+const waitingLabels: Record<string, string> = {
+  'agent-busy': '导演会话正忙，稍候自动继续。',
+  'agent-unavailable': '导演代理不在线，请保持导演会话页面打开。',
+  'read-port-unavailable': '读取端口不可用。',
+  'run-in-flight': '生成进行中，稍后自动查询结果。',
+  'dispatch-unconfirmed': '提交结果未确认，将按原请求号核实，不会重复扣费。',
+  'draft-unavailable': '导演稿读取暂不可用，稍候自动继续。',
+  'quote-unavailable': '核价暂不可用，稍候自动继续。',
+  'run-read-unavailable': '生成状态读取暂不可用，稍候自动继续。',
+  'run-list-unavailable': '生成列表读取暂不可用，稍候自动继续。',
+  'handoff-unavailable': '交接核实暂不可用，稍候自动继续。',
+}
 
 function defaultExpiry(): string {
   const value = new Date(Date.now() + 2 * 3_600_000)
@@ -43,13 +55,17 @@ export function RelayBatchPanel({ sessionId, directorBridge, relations, aspectRa
   const completeRelay = directorBridge.completeRelayBatch
   const closeRelay = directorBridge.closeRelayBatch
   const recoverRelay = directorBridge.recoverRelayBatch
+  const releaseLease = directorBridge.releaseRelayHostLease
+  const driveRelay = directorBridge.driveRelayBatch
   const available = Boolean(readRelay && advanceRelay && completeRelay && closeRelay && recoverRelay)
   const [state, setState] = useState<RelayState | null>()
   const [busy, setBusy] = useState(false)
+  const [driving, setDriving] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [reason, setReason] = useState('')
   const active = useRef(true)
+  const driveLock = useRef(false)
   useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   const refresh = useCallback(async () => {
     if (!readRelay) return
@@ -63,6 +79,35 @@ export function RelayBatchPanel({ sessionId, directorBridge, relations, aspectRa
     setReason('')
     void refresh()
   }, [refresh])
+  const drive = useCallback(() => {
+    if (!driveRelay || driveLock.current) return
+    driveLock.current = true
+    setDriving(true)
+    void driveRelay(sessionId).then((report) => {
+      if (!active.current) return
+      if (report.state) setState(report.state)
+      if (report.action === 'blocked') { setError(`接力受阻：${report.reason ?? '未知原因'}`); setNotice('') }
+      else if (report.action === 'expired') { setError('授权已到期，请关闭本批次。'); setNotice('') }
+      else if (report.action === 'settled') { setNotice('全部镜头已收录，可完成批次。'); setError('') }
+      else if (report.action === 'waiting') {
+        setNotice(waitingLabels[report.reason ?? ''] ?? `等待：${report.reason ?? '未知原因'}`)
+        setError('')
+      } else { setNotice(''); setError('') }
+    }).catch((cause: unknown) => {
+      if (active.current) setError(String(cause))
+    }).finally(() => {
+      driveLock.current = false
+      if (active.current) setDriving(false)
+    })
+  }, [driveRelay, sessionId])
+  const unfinished = state !== null && state !== undefined && state.mode === 'running'
+    && state.items.some(item => !['collected', 'failed', 'blocked', 'abandoned'].includes(item.phase))
+  useEffect(() => {
+    if (!unfinished || !driveRelay) return
+    drive()
+    const timer = setInterval(drive, 15000)
+    return () => { clearInterval(timer) }
+  }, [unfinished, driveRelay, drive])
 
   const eligible = relations?.shots.filter(shot => Number.isInteger(shot.durationSec)
     && shot.durationSec >= 2 && shot.durationSec <= 30) ?? []
@@ -151,6 +196,18 @@ export function RelayBatchPanel({ sessionId, directorBridge, relations, aspectRa
       if (active.current) setBusy(false)
     })
   }
+  const releaseDeadLease = () => {
+    if (!releaseLease || !state) return
+    setBusy(true); setError(''); setNotice('')
+    void releaseLease(sessionId, state.start.batchId).then((result) => {
+      if (!active.current) return
+      setNotice(result.settling ? '已标记释放失效租约，等待进行中的操作收尾后再恢复。' : '已释放失效租约，请恢复 Host 租约。')
+    }).catch((cause: unknown) => {
+      if (active.current) setError(String(cause))
+    }).finally(() => {
+      if (active.current) setBusy(false)
+    })
+  }
   return <details aria-label="导演接力批次" className={styles.relay} open={open}>
     <summary>导演接力批次</summary>
     <p>创建批次只记录镜头范围与付费授权上限，不提交生成；Host 导演在授权内逐镜准备并提交，本页可查看进度、暂停等待或关闭批次。</p>
@@ -212,22 +269,29 @@ export function RelayBatchPanel({ sessionId, directorBridge, relations, aspectRa
       <p className={styles.items}>
         批次 {state.start.batchId} · {modeLabels[state.mode]}
         {state.reason ? ` · ${state.reason}` : ''}
-        <br />授权上限 ¥{state.start.authorization.maxCostCny} · 候选 {state.start.authorization.maxCandidates} 条 ·
+        <br />授权上限 ¥{state.start.authorization.maxCostCny} ·
+        已占 ¥{state.items.reduce((sum, item) => sum + (item.submission ? Number(item.submission.authorizationCapCny) : 0), 0).toFixed(6)} ·
+        候选 {state.start.authorization.maxCandidates} 条 ·
         到期 {new Date(state.start.authorization.expiresAt).toLocaleString('zh-CN', { hour12: false })}
       </p>
       <ul className={styles.items} aria-label="接力逐镜状态">
         {state.items.map((item, index) => <li key={item.scope.shotId}>
           <strong>{index + 1}. {item.label}</strong>
           <span>{phaseLabels[item.phase]}</span>
+          {item.submission && <span>占用 ¥{item.submission.authorizationCapCny}</span>}
           {item.admissions.length > 0 && <span>准入 {item.admissions.length} 次</span>}
           {item.reason && <span>{item.reason}</span>}
         </li>)}
       </ul>
       <div className={styles.actions}>
         <button type="button" disabled={busy} onClick={() => { void refresh() }}>刷新状态</button>
+        {driveRelay && <button type="button" disabled={busy || !open || driving || !unfinished} onClick={drive}>
+          立即驱动接力
+        </button>}
         <button type="button" disabled={busy || !pausable}
           onClick={() => { if (advanceRelay) run(() => advanceRelay(sessionId)) }}>暂停等待准入</button>
         <button type="button" disabled={busy || !open} onClick={recover}>恢复 Host 租约</button>
+        {releaseLease && <button type="button" disabled={busy || !open} onClick={releaseDeadLease}>释放失效租约</button>}
         <button type="button" disabled={busy || !open}
           onClick={() => { if (completeRelay) run(() => completeRelay(sessionId)) }}>完成批次</button>
         <input aria-label="关闭原因" placeholder="关闭原因" value={reason} disabled={busy || !open}
@@ -235,6 +299,7 @@ export function RelayBatchPanel({ sessionId, directorBridge, relations, aspectRa
         <button type="button" disabled={busy || !open || reason.trim().length === 0}
           onClick={() => { if (closeRelay) run(() => closeRelay(sessionId, reason.trim())) }}>关闭批次</button>
       </div>
+      {driving && <p role="status">Host 正在驱动接力…</p>}
     </>}
   </details>
 }

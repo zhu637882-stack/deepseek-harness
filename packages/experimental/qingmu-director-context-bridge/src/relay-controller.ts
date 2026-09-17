@@ -3,9 +3,9 @@
  */
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
-import { claimHostDirectorBinding, releaseHostDirectorBinding } from './bridge.ts'
+import { claimHostDirectorBinding, hasHostDirectorOwner, hostDirectorLeaseHealth, releaseHostDirectorBinding } from './bridge.ts'
 import {
-  appendRelayState, createRelayState, readRelayState, relayBatchIsOpen,
+  appendRelayState, createRelayState, isSettled, readRelayState, relayBatchIsOpen,
   type RelayState,
 } from './relay-state.ts'
 import type { DirectorContextEntryResult, DirectorContextReadPort, DirectorObjectScope } from './types.ts'
@@ -183,15 +183,31 @@ export function recoverRelayBatch(
   return { state, lease }
 }
 
+/** Operator-gated release of a dead Host lease so its open batch can be recovered.
+ * Fail-closed: only an invalidated or already-released owner of this exact batch is released —
+ * a healthy lease is never stolen, a foreign lease is never touched, and a missing lease is an error.
+ * In-flight operations settle before the owner is dropped, matching the lease's own release semantics.
+ * @param session Session that owns the batch ledger.
+ * @param batchId Exact open-batch identity; a mismatch leaves every lease untouched.
+ * @returns settling: true while the released owner's in-flight operations drain before removal.
+ * @throws When the batch is missing, terminal, or mismatched; when no lease exists; or when the lease is healthy.
+ */
+export function releaseDeadRelayHostLease(session: Session, batchId: string): { settling: boolean } {
+  const state = readRelayState(session)
+  if (!state || !relayBatchIsOpen(state) || state.start.batchId !== batchId) {
+    throw new Error('No open relay batch with this identity.')
+  }
+  const health = hostDirectorLeaseHealth(session, batchId)
+  if (health === 'operational' || health === 'foreign') throw new Error('A live Host lease cannot be released.')
+  if (health === 'none') throw new Error('No Host lease exists for this batch.')
+  releaseHostDirectorBinding(session, batchId)
+  return { settling: hasHostDirectorOwner(session) }
+}
+
 function assertAllSettled(state: RelayState): void {
   for (const [index, item] of state.items.entries()) {
     if (!isSettled(item) && item.phase !== 'abandoned') {
       throw new Error(`Relay item ${index} is not settled; cannot complete the batch.`)
     }
   }
-}
-
-function isSettled(item: { phase: string; run: { publicStatus: string } | null }): boolean {
-  return (item.phase === 'collected' && item.run?.publicStatus === 'succeeded')
-    || (item.phase === 'failed' && item.run?.publicStatus === 'failed')
 }

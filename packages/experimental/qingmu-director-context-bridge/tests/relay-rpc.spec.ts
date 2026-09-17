@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { createDirectorContextRpcHandler } from '../src/rpc.ts'
 import { appendRelayState, createRelayState, readRelayState, type RelayStart } from '../src/relay-state.ts'
-import { hasHostDirectorOwner } from '../src/bridge.ts'
+import { hasHostDirectorOwner, invalidateHostDirectorBinding } from '../src/bridge.ts'
 import type { DirectorContextReadPort, DirectorObjectScope } from '../src/types.ts'
 
 const sha = (character: string): string => character.repeat(64)
@@ -312,6 +312,36 @@ describe('recoverRelayBatch RPC', () => {
       .toMatchObject({ ok: true, value: { recovered: true, state: { start: { batchId: 'batch-1' }, mode: 'running' } } })
     expect(hasHostDirectorOwner(session)).toBe(true)
     expect(await handler('recoverRelayBatch', { sessionId: 'relay_session', approve: true }, signal))
+      .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+  })
+})
+
+describe('releaseRelayHostLease RPC', () => {
+  it('releases an invalidated lease through the facade so recovery can proceed', async () => {
+    const { session, handler, signal } = world()
+    await startBatch(handler, signal)
+    invalidateHostDirectorBinding(session)
+    expect(await handler('recoverRelayBatch', { sessionId: 'relay_session' }, signal))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(await handler('releaseRelayHostLease', { sessionId: 'relay_session', batchId: 'batch-1' }, signal))
+      .toEqual({ ok: true, value: { settling: false } })
+    expect(hasHostDirectorOwner(session)).toBe(false)
+    expect(await handler('recoverRelayBatch', { sessionId: 'relay_session' }, signal))
+      .toMatchObject({ ok: true, value: { recovered: true } })
+  })
+
+  it('fails closed for a healthy lease, a mismatched batch and malformed payloads', async () => {
+    const { session, handler, signal } = world()
+    await startBatch(handler, signal)
+    expect(await handler('releaseRelayHostLease', { sessionId: 'relay_session', batchId: 'batch-1' }, signal))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(hasHostDirectorOwner(session)).toBe(true)
+    expect(await handler('releaseRelayHostLease', { sessionId: 'relay_session', batchId: 'batch-2' }, signal))
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect(hasHostDirectorOwner(session)).toBe(true)
+    expect(await handler('releaseRelayHostLease', { sessionId: 'relay_session' }, signal))
+      .toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(await handler('releaseRelayHostLease', { sessionId: 'relay_session', batchId: 'batch 1' }, signal))
       .toMatchObject({ ok: false, error: { code: 'bad-request' } })
   })
 })

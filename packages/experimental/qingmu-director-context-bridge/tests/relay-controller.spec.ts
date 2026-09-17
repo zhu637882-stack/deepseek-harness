@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { MessageId, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { hasHostDirectorOwner } from '../src/bridge.ts'
+import { hasHostDirectorOwner, invalidateHostDirectorBinding, releaseHostDirectorBinding } from '../src/bridge.ts'
 import {
   appendRelayState, createRelayState,
   type RelayStart, type RelayState,
@@ -9,7 +9,7 @@ import {
 import type { DirectorContextReadPort, DirectorObjectScope } from '../src/types.ts'
 import {
   readRelayBatch, startRelayBatch, admitRelayDirector, advanceRelayBatch,
-  completeRelayBatch, closeRelayBatch, recoverRelayBatch,
+  completeRelayBatch, closeRelayBatch, recoverRelayBatch, releaseDeadRelayHostLease,
 } from '../src/relay-controller.ts'
 
 const now = '2026-09-16T00:00:00.000Z'
@@ -341,5 +341,42 @@ describe('recoverRelayBatch', () => {
     expect(recovered!.state.mode).toBe('running')
     expect(recovered!.lease).toHaveProperty('enter')
     expect(recovered!.lease).toHaveProperty('release')
+  })
+})
+
+describe('releaseDeadRelayHostLease', () => {
+  it('should release an invalidated lease so the batch can be recovered without abandoning items', () => {
+    const { session } = sessionWithStartedBatch()
+    invalidateHostDirectorBinding(session)
+    expect(() => recoverRelayBatch(session, dummyPort())).toThrow('Relay batch does not have an available Host lease.')
+    expect(releaseDeadRelayHostLease(session, 'batch-1')).toEqual({ settling: false })
+    expect(hasHostDirectorOwner(session)).toBe(false)
+    const recovered = recoverRelayBatch(session, dummyPort())
+    expect(recovered).not.toBeNull()
+    expect(recovered!.state.items.map(item => item.phase)).toEqual(['pending', 'pending'])
+  })
+
+  it('should refuse to release a healthy lease', () => {
+    const { session } = sessionWithStartedBatch()
+    expect(() => releaseDeadRelayHostLease(session, 'batch-1')).toThrow('A live Host lease cannot be released.')
+    expect(hasHostDirectorOwner(session)).toBe(true)
+  })
+
+  it('should refuse when no lease exists for the batch', () => {
+    const { session } = sessionWithStartedBatch()
+    releaseHostDirectorBinding(session, 'batch-1')
+    expect(() => releaseDeadRelayHostLease(session, 'batch-1')).toThrow('No Host lease exists for this batch.')
+  })
+
+  it('should refuse a mismatched batch identity without touching the live lease', () => {
+    const { session } = sessionWithStartedBatch()
+    expect(() => releaseDeadRelayHostLease(session, 'batch-2')).toThrow('No open relay batch with this identity.')
+    expect(hasHostDirectorOwner(session)).toBe(true)
+  })
+
+  it('should refuse a terminal batch', () => {
+    const { session } = sessionWithStartedBatch()
+    closeRelayBatch(session, 'expired', later)
+    expect(() => releaseDeadRelayHostLease(session, 'batch-1')).toThrow('No open relay batch with this identity.')
   })
 })

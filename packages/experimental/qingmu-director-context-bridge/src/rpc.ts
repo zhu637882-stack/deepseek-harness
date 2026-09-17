@@ -14,8 +14,9 @@ import type {
 } from './types.ts'
 import {
   readRelayBatch, startRelayBatch, admitRelayDirector, advanceRelayBatch,
-  completeRelayBatch, closeRelayBatch, recoverRelayBatch,
+  completeRelayBatch, closeRelayBatch, recoverRelayBatch, releaseDeadRelayHostLease,
 } from './relay-controller.ts'
+import type { RelayDriveReport } from './relay-runner.ts'
 import type { RelayState } from './relay-state.ts'
 
 const bad = (message: string): RpcResult<never> => ({
@@ -46,6 +47,8 @@ function scope(value: unknown): DirectorObjectScope | null {
  * @param draftReaders Optional native prompt and first-draft proposal readers.
  * @param readiness Optional scoped native tool registration check.
  * @param referenceReader Optional loopback reader for the saved reference draft.
+ * @param relayDriver Optional Host drive for an open batch, cancelled with the calling RPC signal;
+ * absent when no live agent registry is mounted.
  * @returns A loopback RPC handler limited to context binding, advisory proposal lineage,
  * native readiness and reference handoff evidence.
  */
@@ -55,12 +58,14 @@ export function createDirectorContextRpcHandler(
   draftReaders?: NativeDraftReaders,
   readiness?: (session: Session) => NativeDirectorReadiness,
   referenceReader?: ConnectionRpcHandler,
+  relayDriver?: (session: Session, signal: AbortSignal) => Promise<RelayDriveReport>,
 ): ConnectionRpcHandler {
   const bridge = createDirectorContextBridge(port)
   type Result = DirectorContextBridgeRpcResult | NativeDraftProposalResult | NativeFirstDraftProposalResult
-    | NativeDirectorReadiness | ReferenceHandoff | RelayState | null
+    | NativeDirectorReadiness | ReferenceHandoff | RelayState | null | RelayDriveReport
     | { readonly state: RelayState }
     | { readonly state: RelayState | null; readonly recovered: boolean }
+    | { readonly settling: boolean }
   return async (endpoint, payload, signal): Promise<RpcResult<Result>> => {
     try {
       const raw = object(payload)
@@ -183,6 +188,17 @@ export function createDirectorContextRpcHandler(
         return { ok: true, value: recovered
           ? { state: recovered.state, recovered: true }
           : { state: null, recovered: false } }
+      }
+      if (endpoint === 'releaseRelayHostLease') {
+        if (!exact(raw, ['sessionId', 'batchId']) || id(raw.batchId) === null) return bad('relay lease release fields invalid')
+        signal.throwIfAborted()
+        return { ok: true, value: releaseDeadRelayHostLease(session, raw.batchId as string) }
+      }
+      if (endpoint === 'driveRelayBatch') {
+        if (!exact(raw, ['sessionId'])) return bad('relay drive fields invalid')
+        if (!relayDriver) return bad('relay driver unavailable')
+        signal.throwIfAborted()
+        return { ok: true, value: await relayDriver(session, signal) }
       }
       return bad('unknown director context operation')
     } catch {

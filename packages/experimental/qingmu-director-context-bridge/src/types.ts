@@ -9,8 +9,10 @@ import type { JsonValue, Session, UserMessage } from '@deepseek-ai/dsh-session'
 import type { ImagoDirectorInstructionsResponse } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type { YimengPromptIrResponse, YimengPromptIrBootstrapResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { RelayStart, RelayState } from './relay-state.ts'
+import type { RelayDriveReport } from './relay-runner.ts'
 
 export type { RelayStart, RelayState } from './relay-state.ts'
+export type { RelayDriveReport, RelayRunnerPorts } from './relay-runner.ts'
 
 /** Full current upstream and C5 read before authoring the first prompt; no invented Ready baseline. */
 export interface NativeFirstDraftInput {
@@ -270,6 +272,10 @@ export interface DirectorContextClientPort {
   closeRelayBatch?(sessionId: string, reason: string, signal?: AbortSignal): Promise<{ readonly state: RelayState }>
   /** Re-claim the Host lease for an open batch after a cold restart; recovered is false when nothing is open. */
   recoverRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<{ readonly state: RelayState | null; readonly recovered: boolean }>
+  /** Release a dead (invalidated) Host lease of the exact open batch so it can be recovered; a live lease always rejects. */
+  releaseRelayHostLease?(sessionId: string, batchId: string, signal?: AbortSignal): Promise<{ readonly settling: boolean }>
+  /** Ask the Host to advance an open batch: admit, drive guarded turns, and dispatch only reserved intents. */
+  driveRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<RelayDriveReport>
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
