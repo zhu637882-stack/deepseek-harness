@@ -239,7 +239,7 @@ describe('storyboard pre-production human review panel', () => {
 
     // The tick was dropped, so the panel cannot resubmit on its own.
     expect(acceptButton().hasAttribute('disabled')).toBe(true)
-    expect(screen.getByLabelText('整集接受备注（必填）').value)
+    expect(screen.getByLabelText<HTMLTextAreaElement>('整集接受备注（必填）').value)
       .toBe('确认整集当前分镜')
     fireEvent.click(screen.getByLabelText(/我已逐帧核对当前分镜帧集合/))
     fireEvent.click(acceptButton())
@@ -280,7 +280,7 @@ describe('storyboard pre-production human review panel', () => {
     expect(screen.getByText(/storyboard_human_review_accept_rejected/)).toBeTruthy()
     expect(gate.sent).toHaveLength(1)
     // The note and the tick were cleared, so a retry is a fresh human decision.
-    expect(screen.getByLabelText('整集接受备注（必填）').value).toBe('')
+    expect(screen.getByLabelText<HTMLTextAreaElement>('整集接受备注（必填）').value).toBe('')
     expect(acceptButton().hasAttribute('disabled')).toBe(true)
 
     gate.accept({
