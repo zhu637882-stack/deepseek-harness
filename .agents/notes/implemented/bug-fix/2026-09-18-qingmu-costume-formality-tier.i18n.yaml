@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-18-qingmu-costume-formality-tier.md
+2026-09-18-qingmu-costume-formality-tier.md: caa008c1c5f20b8f3ca4c0e66daed841a82a56fd
+2026-09-18-qingmu-costume-formality-tier.zh.md: 1675534fbda80192f8f46712e0033b0375a33643
