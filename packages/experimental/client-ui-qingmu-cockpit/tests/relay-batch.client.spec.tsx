@@ -214,7 +214,7 @@ describe('RelayBatchPanel', () => {
     expect(input.projectId).toBe('project-1')
     expect(input.episodeId).toBe('episode-1')
     expect(input.instruction).toBe('按当前导演设计准备这两镜。')
-    expect(input.director).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+    expect(input.director).toEqual({ provider: 'deepseek-official', model: 'deepseek-flash' })
     expect(input.observer).toEqual({ provider: 'qingmu-vision', model: 'qwen3.8-flash' })
     expect(input.shots).toHaveLength(2)
     expect(input.shots[0]).toEqual({

@@ -127,7 +127,7 @@ export function RelayBatchPanel({ sessionId, directorBridge, relations, aspectRa
   }
   const [instruction, setInstruction] = useState('')
   const [directorProvider, setDirectorProvider] = useState('deepseek-official')
-  const [directorModel, setDirectorModel] = useState('deepseek-v4-pro')
+  const [directorModel, setDirectorModel] = useState('deepseek-flash')
   const [observerOn, setObserverOn] = useState(true)
   const [observerProvider, setObserverProvider] = useState('qingmu-vision')
   const [observerModel, setObserverModel] = useState('qwen3.8-flash')
