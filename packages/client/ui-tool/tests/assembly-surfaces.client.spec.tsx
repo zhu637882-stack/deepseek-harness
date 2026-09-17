@@ -72,7 +72,7 @@ async function bench(nodes: ToolResultNode[]) {
     api: { settings: {} },
     isLoopback: false,
     hostDescription: { getSnapshot: () => undefined, subscribe: () => () => {} },
-  })
+  } as never)
   // ui-theme's Appearance row binds a durable scope through these two.
   runtime.provide('remote', { $on: () => () => {} })
   runtime.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
