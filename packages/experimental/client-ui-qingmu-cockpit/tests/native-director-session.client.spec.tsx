@@ -19,8 +19,12 @@ function fixture(blank = true, preset = 'ordinary') {
   const row = { id: 's1', cwd: '/project', blank, agentPreset: preset }
   const sessionState = { current: 's1', ids: ['s1'], byId: { s1: row } }
   const sessions = { list: { getSnapshot: () => sessionState }, binding: vi.fn(() => undefined), noteAgentPreset: vi.fn(), open: vi.fn() }
-  const workspaceState = { items: [{ workspaceId: 'w1', path: '/project', sessionIds: ['s1'] }], recentWorkspaceId: 'w1' }
-  const workspaces = { list: { getSnapshot: () => workspaceState }, connectWorkspace: vi.fn(async () => 'new-empty') }
+  const workspaceState = { items: [{ workspaceId: 'w1', path: '/project', sessionIds: ['s1'] }], recentWorkspaceId: 'w1',
+    archivedSessionIds: [] as string[] }
+  const workspaces = { list: { getSnapshot: () => workspaceState }, connectWorkspace: vi.fn(async () => 'new-empty'),
+    unarchiveSession: vi.fn(async (sessionId: string) => {
+      workspaceState.archivedSessionIds = workspaceState.archivedSessionIds.filter(id => id !== sessionId)
+    }) }
   const api = { agentPresets: { list: vi.fn(async () => ok({ presets: [{ id: 'qingmu-director', broken: false }] })),
     select: vi.fn(async () => ok({ agentPreset: 'qingmu-director' })) }, sessions: {
     create: vi.fn(async (_input?: unknown) => ok({})), prompt: vi.fn(async () => ok({})),
@@ -125,6 +129,35 @@ it('creates separate project directors and restores their own Host identities wi
   expect(f.api.agentPresets.select).not.toHaveBeenCalled()
   expect(f.api.sessions.prompt).not.toHaveBeenCalled()
   expect(f.row.id).toBe('s1')
+})
+
+it('restores an archived project director before opening so the sweep cannot clear the selection', async () => {
+  const f = fixture(false, 'qingmu-director')
+  const id = projectDirectorSessionId('project-a')!
+  const rows = f.sessionState.byId as Record<string, typeof f.row>
+  f.api.sessions.create.mockImplementation(async (input?: unknown) => {
+    const { sessionId, cwd } = input as { sessionId: string; cwd: string }
+    rows[sessionId] = { id: sessionId, cwd, blank: false, agentPreset: 'qingmu-director' }
+    if (!f.sessionState.ids.includes(sessionId)) f.sessionState.ids.push(sessionId)
+    return ok({})
+  })
+  f.workspaceState.archivedSessionIds = [id]
+  const order: string[] = []
+  f.workspaces.unarchiveSession.mockImplementation(async (sessionId: string) => {
+    order.push(`unarchive:${sessionId}`)
+    f.workspaceState.archivedSessionIds = f.workspaceState.archivedSessionIds.filter(row => row !== sessionId)
+  })
+  f.sessions.open.mockImplementation((sessionId: string) => { order.push(`open:${sessionId}`) })
+
+  await f.port.activate('s1', new AbortController().signal, 'project-a')
+  expect(order).toEqual([`unarchive:${id}`, `open:${id}`])
+  expect(f.workspaceState.archivedSessionIds).toEqual([])
+
+  // A never-archived director opens directly without a restore round-trip.
+  f.workspaces.unarchiveSession.mockClear()
+  await f.port.activate('s1', new AbortController().signal, 'project-a')
+  expect(f.workspaces.unarchiveSession).not.toHaveBeenCalled()
+  expect(f.sessions.open).toHaveBeenLastCalledWith(id)
 })
 
 it('cancels project entry when navigation changes during creation', async () => {

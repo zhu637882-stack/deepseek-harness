@@ -154,6 +154,12 @@ export function createNativeDirectorSessionPort(ctx: ClientContext, connection: 
       current()
       await waitForSession(sessions, projectSessionId, signal)
       current()
+      // An archived director session would be swept back to the New Session
+      // view the moment it becomes current; restore it before opening.
+      if (workspaces.list.getSnapshot().archivedSessionIds.includes(projectSessionId)) {
+        await workspaces.unarchiveSession(projectSessionId)
+        current()
+      }
       sessions.open(projectSessionId)
       return
     }
