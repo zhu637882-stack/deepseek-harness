@@ -717,7 +717,7 @@
       "license": "Apache-2.0",
       "files": {
         "LICENSE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
-        "SKILL.md": "15a0e90afe4060d8ede015b221a0d6ca79b92c287ccb8b39a6c7286c2a6f8eba",
+        "SKILL.md": "53452403c1d153c73117702a8e45df075d30eb10d932cb505f3107e1283a3036",
         "references/cinematic-image-direction.md": "b2fc8b2dd6dbd1bcf78bc2671806575352db95481796dc5cae5a5c6a6befb945",
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "a7e8d276f3c726dac65f4e8afa535e5213effee2c820c76d03130da0510a9600"
@@ -729,7 +729,7 @@
         "references/NEGATIVE-CASE-BOOK.md": "ec9ab1a23d45ce5592fbc30fcc458a794c2698e555a74ab58144d6bc9141bf67",
         "agents/openai.yaml": "a7e8d276f3c726dac65f4e8afa535e5213effee2c820c76d03130da0510a9600"
       },
-      "adaptation": "Full asset skill and references; Qingmu scope and delegated creative-review precedence added. Qingmu production-design synthesis distinguishes era/status, visible construction and immutable appearance from shot state. Qingmu costume rules add an occasion-derived formality tier with per-tier required parts, because the upstream restraint on gilding alone let a ceremonial occasion be drawn in everyday dress.",
+      "adaptation": "Full asset skill and references; Qingmu scope and delegated creative-review precedence added. Qingmu production-design synthesis distinguishes era/status, visible construction and immutable appearance from shot state. Qingmu costume rules add an occasion-derived formality tier with per-tier required parts, because the upstream restraint on gilding alone let a ceremonial occasion be drawn in everyday dress; within a tier the baseline richness still scales with the wearer's status, so the tier caps and status floors the design.",
       "adaptedFiles": [
         "SKILL.md"
       ]

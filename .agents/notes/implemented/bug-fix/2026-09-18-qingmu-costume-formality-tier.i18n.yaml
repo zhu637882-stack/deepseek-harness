@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-18-qingmu-costume-formality-tier.md
-2026-09-18-qingmu-costume-formality-tier.md: caa008c1c5f20b8f3ca4c0e66daed841a82a56fd
-2026-09-18-qingmu-costume-formality-tier.zh.md: 1675534fbda80192f8f46712e0033b0375a33643
+2026-09-18-qingmu-costume-formality-tier.md: 989f432980772ad753d69d734904b866c5c05c9d
+2026-09-18-qingmu-costume-formality-tier.zh.md: 323386d1be56c115c334af1a676814688f9871ed
