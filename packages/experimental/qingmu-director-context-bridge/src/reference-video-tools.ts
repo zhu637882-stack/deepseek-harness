@@ -18,7 +18,7 @@ import { readReferenceImage } from './reference-image.ts'
 import { inspectReferenceImage, type ReferenceVisionConfig } from './reference-vision.ts'
 import { creativeRequest } from './creative-request.ts'
 import { readDraftImages, readImageInputs, type DraftImageInput } from './reference-draft-images.ts'
-import type { AssetDesignState, ScenePlanningState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { AssetDesignState, AssetImageQuote, ScenePlanningState } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 
 // Keep catalog pages small; the exact frozen description accompanies inspection of one image.
 function imageCatalogEntry(item: ReferenceVideoAsset) {
@@ -111,6 +111,45 @@ function requestFor(current: BoundRead, draft: JsonValue, source?: ReferenceDire
   // The Host adapter validates every nested wire field. Scope and model are not model-editable.
   return parseReferenceVideoRequest({ ...draft, promptParts, projectId: current.state.binding.scope.projectId,
     frameId: current.state.binding.scope.shotId, model: 'wan3.0-video' })
+}
+
+/** Model-correctable design shape; the backend remains the authority on business fields. */
+interface AssetDesignDraft {
+  assets: Record<string, JsonValue>[]
+  director: Record<string, JsonValue>
+  world?: Record<string, JsonValue>
+}
+
+function assetDesignDraft(value: JsonValue): AssetDesignDraft {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('design must be an object.')
+  if (Object.keys(value).some(key => !['assets', 'director', 'world'].includes(key))) {
+    throw new Error('design accepts only assets, director and optional world; the current creative request fixes the project and episode.')
+  }
+  const draft = value as { assets?: unknown; director?: unknown; world?: unknown }
+  if (!Array.isArray(draft.assets) || draft.assets.length === 0) {
+    throw new Error('design.assets must list every asset of the episode design, including unchanged ones; an omitted asset leaves the saved design.')
+  }
+  if (draft.director === null || typeof draft.director !== 'object' || Array.isArray(draft.director)) {
+    throw new Error('design.director must be the shared director design object from the read.')
+  }
+  if ('world' in value && (draft.world === null || typeof draft.world !== 'object' || Array.isArray(draft.world))) {
+    throw new Error('design.world must be the world object from the read.')
+  }
+  const assets = draft.assets.map((asset) => {
+    if (asset === null || typeof asset !== 'object' || Array.isArray(asset)) throw new Error('Each asset must be an object.')
+    const item = asset as Record<string, JsonValue>
+    if (item.kind !== 'actor' && item.kind !== 'scene' && item.kind !== 'prop') throw new Error('Each asset kind must be actor, scene or prop.')
+    if (typeof item.name !== 'string' || !item.name.trim()) throw new Error('Each asset needs its exact name from the read.')
+    if (typeof item.imagePrompt !== 'string' || !item.imagePrompt.trim()) {
+      throw new Error(`Asset ${item.name} needs a non-empty imagePrompt describing this image's visible view and state.`)
+    }
+    if (typeof item.visualIdentity !== 'string' || !item.visualIdentity.trim()) {
+      throw new Error(`Asset ${item.name} needs a non-empty visualIdentity covering its kind skill's required identity dimensions.`)
+    }
+    return item
+  })
+  return { assets, director: draft.director as Record<string, JsonValue>,
+    ...('world' in value ? { world: draft.world as Record<string, JsonValue> } : {}) }
 }
 
 const editableDraft = {
@@ -222,6 +261,60 @@ export function registerReferenceVideoTools(ctx: Context, ports: Ports): void {
             .map(imageCatalogEntry) },
         referenceGuidance: 'visualInputs follows the saved asset design’s exact generation-input references and stated currentUses. An input may be the original image being repaired; its continued presence does not mean the corrected output is missing or that later shots must use the original. Read the requested corrections and inspect the corresponding owned output candidate before declaring a source conflict. Do not rewrite generation provenance to point at its own output. Choose later-shot references from inspected candidates that satisfy the current design and user decisions, not recency alone. Those purposes decide which appearance, identity or geometry an image contributes; a reference limited to appearance does not override an authored layout. Its current purpose differs from the historical generation description available by explicit inspection. Catalog source records distinguish selected, unselected, stale and reviewed candidates and their owning entity. Missing fields are unknown. Neither selected nor quality passed proves creative acceptance or matching geometry. Different candidates are competing proposals, not automatically matching views of one room. Do not union every candidate into the scene.',
         generationQueued: false, selectionChanged: false })
+    },
+  }))
+  ctx.tools.register(defineTool({
+    name: 'qingmu_save_asset_design',
+    description: 'Save one atomic episode asset design — every character, scene and prop contract plus the shared director design — through the same workspace command the asset desk uses. First read qingmu_read_asset_design and the matching skills (production-design, then character-asset, scene-asset or prop-asset per entity) with qingmu_read_skill_resource. Supply the COMPLETE design from that read with your edits: an omitted existing asset leaves the saved design. New entities without id are created; keep exact ids for existing ones. For every asset, visualIdentity is the persistent identity contract and must cover its kind skill’s required dimensions in positive prose (actors: age, gender, build, face, hair, wardrobe layers, accessories, signature marks); imagePrompt describes only this image’s visible view and current state; designBasis explains script and director reasoning, never a drawing list. State what must be visible; prohibitions have no separate channel and are not sent. A state conflict means the design changed elsewhere: reread and reapply; the conflicted save wrote nothing. After saving, verify the exact compiled request with qingmu_quote_asset_image. This saves a working design only: no price confirmation, paid generation, media selection or creative approval.',
+    parameters: {
+      design: { type: 'json', required: true, description: '{assets, director, world?} exactly as read, with your edits. assets lists every episode asset; kind, name, imagePrompt and visualIdentity are required for each. Keep id, references, space, imageStage, sceneLayout, imageCamera and other read fields intact unless changing them. director carries the shared visualStyle, tone, lightingRules, colorPalette, cameraGrammar, performanceRules and characterContinuityRules. world is the optional setting, scriptFacts, directorInferences, exceptions and openQuestions. No project or episode fields; the current creative request fixes scope.' },
+      expectedStateSha256: { type: 'string', required: true, description: 'saved.stateSha256 from your latest qingmu_read_asset_design; a mismatch rejects the save without writing.' },
+    },
+    output,
+    presentCall: () => ({ card: 'generic', kind: 'edit', title: '保存本集素材设计' }),
+    async execute(args, exec) {
+      exactKeys(args, ['design', 'expectedStateSha256'])
+      const target = creativeRequest(exec)
+      if (!target) throw new Error('Start asset or scene design from the current project before saving its design.')
+      const draft = assetDesignDraft(args.design)
+      const scope = { projectId: target.projectId, episodeId: target.episodeId }
+      const saved = await ctx.qingmuYimengCommand('saveAssetDesign', { ...scope,
+        expectedStateSha256: args.expectedStateSha256, design: draft }, exec.signal)
+      exec.signal.throwIfAborted()
+      if (!saved.ok) throw new Error(`Asset design save was not confirmed. Read the design again and reapply the edit; a conflicted save wrote nothing: ${saved.error.message}`)
+      const value = saved.value as AssetDesignState
+      return ports.boundedJson({ schema: 'qingmu.native-asset-design-saved.v1', scope,
+        stateSha256: value.stateSha256, scriptSha256: value.scriptSha256, scriptRevision: value.scriptRevision,
+        assets: (value.design?.assets ?? []).map(asset => ({ id: asset.id ?? null, kind: asset.kind, name: asset.name })),
+        providerCalls: 0, generationQueued: false, mediaSelectionChanged: false,
+        guidance: 'Saved as the episode working design; these entity ids are current. Quoting, paid generation, review and media selection remain with the workspace and were not performed. Verify changed entities with qingmu_quote_asset_image before any generation.' })
+    },
+  }))
+  ctx.tools.register(defineTool({
+    name: 'qingmu_quote_asset_image',
+    description: 'Compile one saved asset entity’s exact image request as an unpaid dry run: the precise prompt the image model would receive with project style, director rules and framing already appended, plus target model, capability, size, references and the catalog list price. The quote reflects only SAVED design content — save the design first. Use it to verify an authored contract compiles within the model limit and reads as intended, and to report the exact price before a human confirms generation in the workspace. A conflict means the saved design no longer matches the script or entity: reread the design. No generation, reservation, adoption or selection.',
+    parameters: { entityId: { type: 'string', required: true, description: 'Exact saved asset id from qingmu_read_asset_design or the save receipt.' } },
+    output,
+    presentCall: () => ({ card: 'generic', kind: 'read', title: '核对素材出图提示词与目录价' }),
+    async execute(args, exec) {
+      exactKeys(args, ['entityId'])
+      const target = creativeRequest(exec)
+      if (!target) throw new Error('Start asset or scene design from the current project before quoting its images.')
+      const scope = { projectId: target.projectId, episodeId: target.episodeId }
+      const quoted = await ctx.qingmuYimengCommand('quoteAssetImage', { ...scope, entityId: args.entityId }, exec.signal)
+      exec.signal.throwIfAborted()
+      if (!quoted.ok) throw new Error(`Asset image quote unavailable; the saved design, entity and script must align: ${quoted.error.message}`)
+      const value = quoted.value as AssetImageQuote & { size?: string; stateSha256?: string }
+      return ports.boundedJson({ schema: 'qingmu.native-asset-image-quote.v1', scope,
+        entity: { id: value.entity.id, kind: value.entity.kind, name: value.entity.name },
+        model: value.model, capability: value.capability ?? 'image.generate', prompt: value.prompt, size: value.size ?? null,
+        references: value.references ?? [], estimatedCny: value.estimatedCny, generationAvailable: value.generationAvailable,
+        quoteSha256: value.quoteSha256, stateSha256: value.stateSha256 ?? null,
+        // The attached blockout data-URL never crosses into model context.
+        ...(value.compositionReference ? { compositionReference: Object.fromEntries(Object.entries(value.compositionReference)
+          .filter(([key]) => key !== 'imageUrl')) } : {}),
+        providerCalls: 0, generationQueued: false, mediaSelectionChanged: false,
+        guidance: 'Dry run only; nothing was generated, reserved or selected. This prompt is the exact provider input including appended project clauses — verify identity coverage and length here, not by guessing. The price is the catalog list estimate; a human confirms any payment in the workspace.' })
     },
   }))
   ctx.tools.register(defineTool({

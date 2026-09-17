@@ -82,6 +82,8 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 
 同一读取器可用时，`qingmu_read_reference_draft` 读取已存引用草稿和指定页的图片/音色元数据。`qingmu_preview_reference_draft` 编译准确文字与引用映射；`qingmu_save_reference_draft` 使用页面相同的命令和权威回读保存用户要求的修改。会话固定项目、镜头和模型；模型只提供可编辑字段、已读版本与镜头 SHA。编译及来源/草稿检查拒绝过期修改。保存响应丢失时通过回读确认，不自动重提。工具结果进入会话日志，不含签名媒体 URL；元数据不代表审图或听音。页面显式恢复已存版本，保留本地未保存输入。这些工具不选定媒体、不生成候选。
 
+在本集创作请求内，`qingmu_save_asset_design` 经既有命令适配端点保存完整的素材设计：创作请求固定项目与集，模型只提供 `design` 与已读 `expectedStateSha256`。素材的 kind 限 actor、scene、prop，且 name、imagePrompt、visualIdentity 非空；其余字段以后端为权威，省略的单素材细节由后端保留。状态冲突拒绝保存且不写入，需重新读取后重放编辑。出图 API 没有负向提示词通道，身份合同用正向表述写明必备维度，禁止事项绝不写成正面 prose。随后 `qingmu_quote_asset_image` 以零付费 GET 试算返回后端为某个已保存实体编译的出图请求——最终提示词原文、模型、引用与目录价，构图参考的图片数据被剔除。保存不是价格确认、付费生成、媒体选定或批准；询价不执行生成。在任何付费步骤之前，修正设计并重新询价不产生费用。
+
 `readNativeDraftProposal` 是读取最新已记录原生建议的只读 loopback 接口。它重新核对 Writer 上下文、提示词基线、方法与会话绑定，区分 current、stale、unavailable 和没有建议。建议只包含来源坐标、回执 ID、原文/替换文字和理由；上下文与方法正文留在原始读取结果中。驾驶舱对照原文与建议，明确采用到未保存草稿；采用时再核对来源，并保留人工修改。既有方法检查、预览、保存和 Writer 权威回读仍独立执行，不引入场景规划保存、批准、生成、额外数据库或队列。单字段建议需要已有 Ready PromptIR；首份草稿仍走原工作区。
 
 `maxOutputBytes` 默认限制每份完整 JSON 响应为 262144 个 UTF-8 字节。超限时失败，不截断内容。IMAGO 来源加载器另设单文件 128 KiB、整包 512 KiB 上限，因此合规来源包仍可能超过本消费端的响应上限。须显式配置 Host 上限或读取固定追加参考，不能静默缩减方法。

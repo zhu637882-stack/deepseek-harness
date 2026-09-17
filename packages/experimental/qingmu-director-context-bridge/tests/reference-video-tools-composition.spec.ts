@@ -162,6 +162,12 @@ fixture = { request, response, savedDraft }, startingImagePrompt = planningShots
     quoteSha256: options.quoteSha256 ?? 'b'.repeat(64), authorizationCapCny: options.authorizationCapCny ?? '4.800000',
     candidates: [], providerCalls: 0, selectionChanged: false,
   })
+  let assetDesignState: Record<string, unknown> = {
+    schema: 'qingmu.asset-design-state.v1', projectId: 'p', episodeId: 'episode-a',
+    stateSha256: 'a'.repeat(64), creativeSettings: { initialBrief: 'Older librarian, age  sixty; provisional wardrobe proposal, not approved.' }, script: {},
+    design: image?.assetDesign ?? { assets: [{ kind: 'scene', name: 'Library',
+      space: { layout: 'Return desk beside the entrance; repair table beneath the west window.' } }] },
+  }
   const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input)
     if (url.pathname.endsWith('/asset-design/layout-preview')) return Response.json({
@@ -169,11 +175,28 @@ fixture = { request, response, savedDraft }, startingImagePrompt = planningShots
       imageUrl: `data:image/png;base64,${imageBytes.toString('base64')}`, sha256: imageSha,
       width: 1, height: 1, objects: [], guidance: 'Authored volumes only; compare with source images.',
     })
-    if (url.pathname.endsWith('/asset-design')) return Response.json({
-      schema: 'qingmu.asset-design-state.v1', projectId: 'p', episodeId: 'episode-a',
-      stateSha256: 'a'.repeat(64), creativeSettings: { initialBrief: 'Older librarian, age  sixty; provisional wardrobe proposal, not approved.' }, script: {}, design: image?.assetDesign ?? { assets: [{ kind: 'scene', name: 'Library',
-        space: { layout: 'Return desk beside the entrance; repair table beneath the west window.' } }] },
-    })
+    if (url.pathname.endsWith('/asset-design')) {
+      if (init?.method === 'POST') {
+        if (typeof init.body !== 'string') throw new Error('Expected a JSON asset design save body')
+        const command = JSON.parse(init.body) as { expectedStateSha256: string; design: Record<string, unknown> }
+        if (command.expectedStateSha256 !== assetDesignState.stateSha256) {
+          return Response.json({ detail: { code: 'asset_design_state_conflict' } }, { status: 409 })
+        }
+        assetDesignState = { ...assetDesignState, design: command.design, stateSha256: 'f'.repeat(64) }
+      }
+      return Response.json(assetDesignState)
+    }
+    const assetQuoteMatch = /\/asset-design\/([^/]+)\/quote$/u.exec(url.pathname)
+    if (assetQuoteMatch) {
+      const design = assetDesignState.design as { assets?: { id?: string; kind: string; name: string; imagePrompt?: string }[] }
+      const assets = design.assets ?? []
+      const entity = assets.find(item => item.id === assetQuoteMatch[1])
+      if (!entity) return Response.json({ detail: { code: 'asset_design_entity_conflict' } }, { status: 409 })
+      const core = { entity, projectId: 'p', episodeId: 'episode-a', stateSha256: assetDesignState.stateSha256,
+        model: 'wan2.7-image-pro', prompt: `${entity.name}的素材参考图。；以下项目创作设定必须应用，但不得覆盖前面的角色、场景或道具实体事实；本次画面描述：${entity.imagePrompt ?? ''}`,
+        size: '2048*2048', capability: 'image.generate', references: [], generationAvailable: true, estimatedCny: '0.140000' }
+      return Response.json({ ...core, quoteSha256: sha(core) })
+    }
     if (url.pathname.endsWith('/working-cut')) return Response.json(workingCut)
     if (url.pathname.endsWith('/working-cut/save')) {
       if (typeof init?.body !== 'string') throw new Error('Expected JSON request body')
@@ -344,6 +367,8 @@ fixture = { request, response, savedDraft }, startingImagePrompt = planningShots
   const read = createYimengReadHandler({}, { fetch, readToken: () => 'test-only' })
   const command = createYimengCommandHandler({}, { fetch, readToken: () => 'test-only', readYimeng: read })
   return { fetch, read, command, inputReceipt, saved: () => frameDraft('f'), director: () => currentPlanning.frameRequirements[0]!.directorPlan,
+    assetDesign: () => assetDesignState,
+    setAssetDesign: (value: Record<string, unknown>) => { assetDesignState = value },
     planReceipt: () => sha({ scope, context: currentContext, planning: currentPlanning }),
     setDirectorSource: (value: typeof directorSource) => { directorSource = value },
     afterDraftRead: (callback: () => void) => { afterDraftRead = callback },
@@ -767,6 +792,119 @@ it('reads saved episode geography and actual image pixels before any shot exists
   expect(media).toHaveBeenCalledOnce()
   expect(h.upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
   expect(JSON.parse(result(h.agent, 'assets').text)).toMatchSnapshot()
+})
+
+it('saves a complete authored asset design through the shipped director and command adapter', async () => {
+  const director = { visualStyle: '纪实摄影写实', tone: '克制冷调', lightingRules: '柔和自然光，不用戏剧性暗光遮挡身份特征',
+    colorPalette: ['灰蓝', '米白'], cameraGrammar: '固定机位长镜头', performanceRules: '生活化表演，不瞪眼不甩头',
+    characterContinuityRules: '全片同一妆发与服装，剧情变化只写当下状态' }
+  const edited = { assets: [{ kind: 'actor', id: 'actor_1', name: '林晚',
+    imagePrompt: '图书馆还书台前的正面半身像，林晚穿着藏青色开衫，神情疲惫但目光清醒。',
+    visualIdentity: '林晚，58岁女性，中等身材微驼背，圆脸有细纹，灰白齐耳短发，藏青色开衫配米色衬衫，黑框老花镜，气质克制温和。' }], director }
+  const h = await harness(new MockAdapter([
+    toolCallResponse('read', 'qingmu_read_asset_design', { page: 1 }),
+    toolCallResponse('save', 'qingmu_save_asset_design', { design: edited, expectedStateSha256: 'a'.repeat(64) }),
+    textResponse('素材设计已保存；尚未报价、生成或选用媒体。'),
+  ]), writer())
+  h.upstream.setAssetDesign({
+    schema: 'qingmu.asset-design-state.v1', projectId: 'p', episodeId: 'episode-a',
+    stateSha256: 'a'.repeat(64), scriptSha256: 'e'.repeat(64), scriptRevision: 3,
+    creativeSettings: { initialBrief: 'Older librarian, age sixty.' }, script: {},
+    design: { assets: [{ kind: 'actor', id: 'actor_1', name: '林晚', imagePrompt: '旧的一图描述', visualIdentity: '旧身份合同' }], director } })
+  await h.run(false, {})
+  expect(result(h.agent, 'read').error, result(h.agent, 'read').text).toBe(false)
+  const save = result(h.agent, 'save')
+  expect(save.error, save.text).toBe(false)
+  const posts = h.upstream.fetch.mock.calls.filter(([url, init]) =>
+    new URL(url instanceof Request ? url.url : url).pathname.endsWith('/asset-design') && init?.method === 'POST')
+  expect(posts).toHaveLength(1)
+  expect(JSON.parse(posts[0]?.[1]?.body as string)).toEqual({ expectedStateSha256: 'a'.repeat(64), design: edited })
+  expect(JSON.parse(save.text)).toMatchObject({ schema: 'qingmu.native-asset-design-saved.v1',
+    scope: { projectId: 'p', episodeId: 'episode-a' }, stateSha256: 'f'.repeat(64), scriptSha256: 'e'.repeat(64), scriptRevision: 3,
+    assets: [{ id: 'actor_1', kind: 'actor', name: '林晚' }], providerCalls: 0, generationQueued: false, mediaSelectionChanged: false })
+  const calledPaidEndpoints = h.upstream.fetch.mock.calls.some(([url]) =>
+    /\/(generate|quote)$/.test(url instanceof Request ? url.url : String(url)))
+  expect(calledPaidEndpoints).toBe(false)
+})
+
+it('rejects a stale asset design state without writing', async () => {
+  const h = await harness(new MockAdapter([
+    toolCallResponse('save', 'qingmu_save_asset_design', {
+      design: { assets: [{ kind: 'actor', id: 'actor_1', name: '林晚', imagePrompt: '新描述', visualIdentity: '新身份合同' }],
+        director: { visualStyle: '写实' } },
+      expectedStateSha256: 'c'.repeat(64) }),
+    textResponse('状态冲突，未写入。'),
+  ]), writer())
+  await h.run(false, {})
+  const save = result(h.agent, 'save')
+  expect(save.error).toBe(true)
+  expect(save.text).toContain('Asset design save was not confirmed')
+  const posts = h.upstream.fetch.mock.calls.filter(([url, init]) =>
+    new URL(url instanceof Request ? url.url : url).pathname.endsWith('/asset-design') && init?.method === 'POST')
+  expect(posts).toHaveLength(1)
+  expect(h.upstream.assetDesign()).toMatchObject({ stateSha256: 'a'.repeat(64) })
+})
+
+it.each([
+  ['an injected scope', { design: { assets: [{ kind: 'actor', id: 'actor_1', name: '林晚', imagePrompt: '描述', visualIdentity: '身份' }], director: {} },
+    expectedStateSha256: 'a'.repeat(64), projectId: 'other' }, 'current session chooses the project'],
+  ['a missing director design', { design: { assets: [{ kind: 'actor', id: 'actor_1', name: '林晚', imagePrompt: '描述', visualIdentity: '身份' }] },
+    expectedStateSha256: 'a'.repeat(64) }, 'design.director'],
+  ['a missing identity contract', { design: { assets: [{ kind: 'actor', id: 'actor_1', name: '林晚', imagePrompt: '描述' }], director: {} },
+    expectedStateSha256: 'a'.repeat(64) }, 'visualIdentity'],
+  ['a missing image description', { design: { assets: [{ kind: 'actor', id: 'actor_1', name: '林晚', visualIdentity: '身份' }], director: {} },
+    expectedStateSha256: 'a'.repeat(64) }, 'imagePrompt'],
+  ['an unknown asset kind', { design: { assets: [{ kind: 'voice', id: 'voice_1', name: '声', imagePrompt: '描述', visualIdentity: '身份' }], director: {} },
+    expectedStateSha256: 'a'.repeat(64) }, 'actor, scene or prop'],
+] as const)('rejects an authored asset design with %s before any writer write', async (_label, args, message) => {
+  const h = await harness(new MockAdapter([
+    toolCallResponse('save', 'qingmu_save_asset_design', args),
+    textResponse('已拒绝，未写入。'),
+  ]), writer())
+  await h.run(false, {})
+  expect(result(h.agent, 'save').error).toBe(true)
+  expect(result(h.agent, 'save').text).toContain(message)
+  expect(h.upstream.fetch.mock.calls.every(([url, init]) =>
+    !new URL(url instanceof Request ? url.url : url).pathname.endsWith('/asset-design') || init?.method !== 'POST')).toBe(true)
+})
+
+it('does not save an asset design from a single-shot binding', async () => {
+  const h = await harness(new MockAdapter([
+    toolCallResponse('save', 'qingmu_save_asset_design', {
+      design: { assets: [{ kind: 'actor', id: 'actor_1', name: '林晚', imagePrompt: '描述', visualIdentity: '身份' }], director: {} },
+      expectedStateSha256: 'a'.repeat(64) }),
+    textResponse('Use the current project request.')]))
+  await h.run(true)
+  expect(result(h.agent, 'save').error).toBe(true)
+  expect(result(h.agent, 'save').text).toContain('Start asset or scene design')
+  expect(h.upstream.fetch.mock.calls.every(([url, init]) =>
+    !new URL(url instanceof Request ? url.url : url).pathname.endsWith('/asset-design') || init?.method !== 'POST')).toBe(true)
+})
+
+it('compiles a saved entity’s exact image request as an unpaid dry run', async () => {
+  const h = await harness(new MockAdapter([
+    toolCallResponse('quote', 'qingmu_quote_asset_image', { entityId: 'actor_1' }),
+    toolCallResponse('missing', 'qingmu_quote_asset_image', { entityId: 'actor_2' }),
+    textResponse('已核对完整出图请求与目录价；未生成、未预留、未选用。'),
+  ]), writer())
+  h.upstream.setAssetDesign({
+    schema: 'qingmu.asset-design-state.v1', projectId: 'p', episodeId: 'episode-a',
+    stateSha256: 'a'.repeat(64), scriptSha256: 'e'.repeat(64), scriptRevision: 3, creativeSettings: {}, script: {},
+    design: { assets: [{ kind: 'actor', id: 'actor_1', name: '林晚', imagePrompt: '图书馆还书台前的正面半身像。', visualIdentity: '完整身份合同。' }],
+      director: { visualStyle: '写实' } } })
+  await h.run(false, {})
+  const quote = result(h.agent, 'quote')
+  expect(quote.error, quote.text).toBe(false)
+  const value = JSON.parse(quote.text) as { prompt: string; quoteSha256: string }
+  expect(value).toMatchObject({ schema: 'qingmu.native-asset-image-quote.v1', scope: { projectId: 'p', episodeId: 'episode-a' },
+    entity: { id: 'actor_1', kind: 'actor', name: '林晚' }, model: 'wan2.7-image-pro', capability: 'image.generate',
+    size: '2048*2048', estimatedCny: '0.140000', generationAvailable: true, stateSha256: 'a'.repeat(64),
+    providerCalls: 0, generationQueued: false, mediaSelectionChanged: false })
+  expect(value.prompt).toContain('图书馆还书台前的正面半身像。')
+  expect(value.quoteSha256).toMatch(/^[a-f0-9]{64}$/)
+  expect(result(h.agent, 'missing').error).toBe(true)
+  expect(result(h.agent, 'missing').text).toContain('Asset image quote unavailable')
+  expect(h.upstream.fetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
 })
 it.each([
   ['other session', { sessionId: 'another' }, imageArgs],
