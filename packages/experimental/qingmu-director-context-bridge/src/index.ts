@@ -7,6 +7,8 @@ import { nativeDialogueProjection } from './dialogue-projection.ts'
 import { relayStateProjectionDefinition } from './relay-projection.ts'
 import { createDirectorContextRpcHandler } from './rpc.ts'
 import { readNativeDirectorReadiness } from './native-readiness.ts'
+import { registerExperienceCapsuleReviewRoutes } from './experience-capsule-review.ts'
+import { resolveCapsuleRuntimeRoot } from './experience-capsule-store.ts'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 
@@ -29,7 +31,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Register the latest whole-value director binding projection. */
+/** Register the latest whole-value director binding projection and the capsule review routes. */
 export function apply(ctx: Context): void {
   ctx.sessionProjections.register(directorContextBindingProjectionDefinition)
   ctx.sessionProjections.register(nativeDialogueProjection)
@@ -53,5 +55,10 @@ export function apply(ctx: Context): void {
     host.connection.rpc.handle('/qingmu-director-context', handler, {
       authority: 'loopback',
     })
+  })
+  ctx.inject(['webServer'], (host) => {
+    ctx.effect(() => registerExperienceCapsuleReviewRoutes(host.webServer, {
+      runtimeRoot: resolveCapsuleRuntimeRoot(),
+    }))
   })
 }
