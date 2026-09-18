@@ -38,7 +38,7 @@ export function registerShootingFirstFrame(server: WebServer, baseUrl: string, f
             if (size > 8192) throw new Error('request_too_large')
             parts.push(bytes)
           }
-          const value = JSON.parse(Buffer.concat(parts).toString('utf8')) as Record<string, unknown>
+          const value = JSON.parse(Buffer.concat(parts).toString('utf8')) as Record<string, unknown> | null
           const keys = ['project_id', 'episode_id', 'frame_ids', ...(operation === 'submit' ? ['candidate_request_id', 'shooting_preflight_id', 'shooting_payload_hash'] : operation === 'confirm' ? ['expected_frame_digest', 'idempotency_key'] : operation === 'video-resume' ? ['scene_id', 'task_id'] : operation === 'preview' && value?.candidate_request_id !== undefined ? ['candidate_request_id'] : [])]
           if (!value || Object.keys(value).sort().join() !== keys.sort().join() || !Array.isArray(value.frame_ids) || value.frame_ids.length !== 1) throw new Error('invalid_request')
           if (operation === 'video-resume') {
@@ -50,7 +50,7 @@ export function registerShootingFirstFrame(server: WebServer, baseUrl: string, f
             if (ids.some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id))
               || typeof value.expected_frame_digest !== 'string' || !/^[a-f0-9]{64}$/.test(value.expected_frame_digest)
               || typeof value.idempotency_key !== 'string' || !/^[A-Za-z0-9._:-]{8,128}$/.test(value.idempotency_key)) throw new Error('invalid_review_binding')
-            upstream.pathname = `/api/episodes/${value.episode_id}/storyboard-frames/${value.frame_ids[0]}/human-review`
+            upstream.pathname = `/api/episodes/${String(value.episode_id)}/storyboard-frames/${String(value.frame_ids[0])}/human-review`
             upstream.search = '?single_frame=true'
             body = JSON.stringify({ expected_frame_digest: value.expected_frame_digest, idempotency_key: value.idempotency_key, decision: 'accepted' })
           } else body = JSON.stringify(value)

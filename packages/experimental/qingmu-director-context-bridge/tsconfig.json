@@ -7,6 +7,8 @@
   "include": ["src"],
   "references": [
     { "path": "../../core/agent" },
+    { "path": "../../attachment/attachment" },
+    { "path": "../../llm/llm" },
     { "path": "../../preset/agent-presets" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
@@ -14,6 +16,9 @@
     { "path": "../../core/scope" },
     { "path": "../qingmu-imago-method-adapter" },
     { "path": "../../core/session" },
+    { "path": "../../session/session-persistence" },
+    { "path": "../../compaction/compaction" },
+    { "path": "../../skill/tool-skill" },
     { "path": "../../session/session-projection" },
     { "path": "../qingmu-yimeng-command-adapter" },
     { "path": "../qingmu-yimeng-read-adapter" },

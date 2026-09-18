@@ -138,7 +138,7 @@ function stateIsCurrent(value: unknown, expected: Omit<Coordinates, 'assetId' | 
     || root.storyboardRevisionId !== expected.storyboardRevisionId || root.frameId !== expected.frameId
     || !Array.isArray(root.candidates) || !Array.isArray(root.blockers)
     || root.providerCalls !== 0 || root.taskMutation !== false || root.outboxEvents !== 0) return false
-  const identity = root.identity as Record<string, unknown> | undefined
+  const identity = root.identity as Record<string, unknown> | null | undefined
   const baseValid = typeof root.frameUpdatedAt === 'string' && Number.isSafeInteger(root.storyboardRevision)
     && Number(root.storyboardRevision) >= 1
     && typeof identity === 'object' && identity !== null && identity.state === 'bound'
@@ -187,7 +187,7 @@ async function requestBody(req: IncomingMessage): Promise<Record<string, unknown
   if (!Number.isSafeInteger(declared) || declared < 1 || declared > 8192) return undefined
   const chunks: Buffer[] = []; let size = 0
   for await (const item of req) {
-    const chunk = Buffer.isBuffer(item) ? item : Buffer.from(item)
+    const chunk = Buffer.from(item as Uint8Array)
     size += chunk.length
     if (size > declared) return undefined
     chunks.push(chunk)
@@ -458,6 +458,6 @@ export function registerFirstFrameSelectionCommands(
     },
   }))
   return () => {
-    disposeMedia.forEach(dispose => dispose()); disposeReceipt(); disposeDecision(); disposeStates.forEach(dispose => dispose())
+    disposeMedia.forEach((dispose) => { dispose() }); disposeReceipt(); disposeDecision(); disposeStates.forEach((dispose) => { dispose() })
   }
 }

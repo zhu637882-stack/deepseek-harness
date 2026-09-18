@@ -179,9 +179,10 @@ export function QingmuCockpit({
   wide, port, directorBridge, nativeDirectorSession, hostSync, entryScope, t, useSessions, applicationShell, onOpenTools,
 }: QingmuCockpitProps) {
   const [open, setOpen] = useState(true)
+  const entryLocation = (globalThis as { readonly location?: Location }).location
   const [tab, setTab] = useState<Tab>(() => applicationShell
-    ? STEP_TABS[creativeStepFromSearch(globalThis.location?.search ?? '')]
-    : new URLSearchParams(globalThis.location?.search ?? '').get('qingmuView') === 'shooting' ? 'shots' : 'director')
+    ? STEP_TABS[creativeStepFromSearch(entryLocation?.search ?? '')]
+    : new URLSearchParams(entryLocation?.search ?? '').get('qingmuView') === 'shooting' ? 'shots' : 'director')
   const [shootingAction, setShootingAction] = useState<string>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
@@ -211,7 +212,7 @@ export function QingmuCockpit({
       else { const url = new URL(location.href); url.searchParams.set('qingmuView', creativeStepForTab(tab)); history.replaceState(history.state, '', url) }
     }
     window.addEventListener('popstate', changed)
-    return () => window.removeEventListener('popstate', changed)
+    return () => { window.removeEventListener('popstate', changed) }
   }, [applicationShell, tab, t])
   useEffect(() => {
     if (!applicationShell) return
@@ -596,7 +597,7 @@ export function QingmuCockpit({
         t={t}
       />
       {shootingAction && <div className={css.shootingAction} role="dialog" aria-modal="true" aria-label="本镜操作">
-        <button type="button" onClick={() => setShootingAction(undefined)}>返回拍摄与审看</button>
+        <button type="button" onClick={() => { setShootingAction(undefined) }}>返回拍摄与审看</button>
         <PromptIrWorkspace key={`${episodeId}:${shootingAction}:shooting-action`} presentation="shooting" projectId={projectId} episodeId={episodeId} shotItems={shotItems}
           storyboardRevisionId={shotRelations?.storyboardRevision.revisionId ?? ''} selectedShotId={shootingAction} onSelectShotId={setShootingAction}
           port={port} t={t} onCommitted={refreshWorkflowAfterCommit} />
@@ -835,7 +836,7 @@ export function QingmuCockpit({
         {error && <div role="alert" className={css.error}><p>当前项目暂时无法更新。已有素材保留，请刷新重试。</p><details><summary>开发日志</summary>{error}</details></div>}
         <div className={css.body}><main aria-label={creating ? '新建项目' : `青木 · ${creativeStepLabel(step)}`}>
           {creating || (!loading && projects.length === 0 && !error)
-            ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('overview') }} onCancel={projects.length ? () => setCreating(false) : undefined} />
+            ? <CreateProjectWorkspace port={port} onCreated={async (result) => { await refresh(result); setCreating(false); setTab('overview') }} onCancel={projects.length ? () => { setCreating(false) } : undefined} />
             : applicationPanels[step]}
         </main></div>
       </div>

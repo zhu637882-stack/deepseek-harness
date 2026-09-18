@@ -8,7 +8,7 @@ function readMarker(key: string, scope: FirstFrameSelectionCoordinates): Marker 
   const raw = localStorage.getItem(key)
   if (raw === null) return
   const value = JSON.parse(raw) as Marker
-  if (!value || Object.entries(scope).some(([k, v]) => value[k as keyof Marker] !== v)
+  if (Object.entries(scope).some(([k, v]) => value[k as keyof Marker] !== v)
     || typeof value.assetId !== 'string' || !/^[A-Za-z0-9._:-]{1,256}$/.test(value.assetId)
     || typeof value.expectedMaterializedSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.expectedMaterializedSha256)
     || typeof value.idempotencyKey !== 'string' || !/^first-frame-[A-Za-z0-9-]+$/.test(value.idempotencyKey)
@@ -62,7 +62,7 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
       setItems(values); setActiveId(values.at(-1)?.assetId ?? '')
     }).catch(() => { if (!controller.signal.aborted) setError('首帧历史暂时无法读取，请重新打开。') })
     void readSelection(controller.signal).catch(() => { if (!controller.signal.aborted) setSelectionLoad('failed') })
-    return () => controller.abort()
+    return () => { controller.abort() }
   }, [client, readSelection])
   const onPreviewReady = useCallback((url: string | undefined) => { setViewed(url !== undefined); setPreviewUrl(url) }, [])
   const current = items?.find(item => item.assetId === activeId)
@@ -143,7 +143,7 @@ export function ShootingFirstFrameHistory({ scope, onCommitted, onCandidatePrevi
     </button>)}</div>
     <div className={css.footer}>
       {eligible && viewed && !pending && <button className={css.primary} type="button" disabled={busy} onClick={() => { void adopt() }}>认可并采用这张首帧</button>}
-      {selectionLoad === 'failed' ? <div role="alert"><p>采用条件暂时无法读取。你可以继续比较候选，不必因此重新生成。</p><button type="button" onClick={() => { void readSelection().catch(() => setSelectionLoad('failed')) }}>重新检查采用条件</button></div>
+      {selectionLoad === 'failed' ? <div role="alert"><p>采用条件暂时无法读取。你可以继续比较候选，不必因此重新生成。</p><button type="button" onClick={() => { void readSelection().catch(() => { setSelectionLoad('failed') }) }}>重新检查采用条件</button></div>
         : current && !eligible && !current.isSelected && <p role="status">{selectionLoad === 'loading' ? '正在读取采用条件…' : current.qualityStatus === 'pending' ? '这张图片的检查结果尚未就绪。可继续比较，暂不能采用。' : '这张图片不符合当前采用条件，仅供对照；现有选用不会改变。'}</p>}
       {pending && <button type="button" disabled={busy} onClick={() => { void recover() }}>{canReadReceipt ? '读取原采用结果' : '继续原采用操作'}</button>}
       {error && <p role="alert">{error}</p>}

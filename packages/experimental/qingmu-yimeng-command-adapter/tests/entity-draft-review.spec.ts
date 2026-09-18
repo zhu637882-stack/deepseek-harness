@@ -6,6 +6,8 @@ import { registerEntityDraftReviewCommands } from '../src/entity-draft-review.ts
 
 const SHA = 'a'.repeat(64)
 const REVIEW_SHA = 'b'.repeat(64)
+const requestUrl = (input: string | URL | Request): string =>
+  typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
 let server: Server | undefined
 let dispose: (() => void) | undefined
 
@@ -64,7 +66,7 @@ describe('PromptIR entity-draft review command bridge', () => {
   it('uses cookie-only intent then commit and recovers an ambiguous commit by GET', async () => {
     let commitCalls = 0
     const upstream = vi.fn<typeof globalThis.fetch>(async (input, init) => {
-      const url = new URL(input instanceof URL ? input.href : String(input))
+      const url = new URL(requestUrl(input))
       const headers = new Headers(init?.headers)
       expect(headers.get('cookie')).toBe('jason_token=human-cookie')
       expect(headers.get('authorization')).toBeNull()
@@ -108,7 +110,7 @@ describe('PromptIR entity-draft review command bridge', () => {
 
   it('rejects a recovered receipt whose source binding does not match the route', async () => {
     const upstream = vi.fn<typeof globalThis.fetch>(async (input) => {
-      const url = new URL(input instanceof URL ? input.href : String(input))
+      const url = new URL(requestUrl(input))
       if (url.pathname.endsWith('/intent')) return Response.json({
         schema: 'jason.qingmu-human-authority-intent.v1', action: 'entity_draft_human_review.record',
         proof: 'sealed-proof', requestSha256: SHA,

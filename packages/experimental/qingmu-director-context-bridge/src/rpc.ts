@@ -11,6 +11,11 @@ import type { NativeFirstDraftProposalResult } from './types.ts'
 import type {
   DirectorContextBridgeRpcResult, DirectorContextReadPort, DirectorObjectScope, NativeDraftProposalResult, NativeDirectorReadiness,
 } from './types.ts'
+import {
+  readRelayBatch, startRelayBatch, admitRelayDirector, advanceRelayBatch,
+  completeRelayBatch, closeRelayBatch, recoverRelayBatch,
+} from './relay-controller.ts'
+import type { RelayState } from './relay-state.ts'
 
 const bad = (message: string): RpcResult<never> => ({
   ok: false, error: { code: 'bad-request', message, details: { issues: [] } },
@@ -46,7 +51,10 @@ export function createDirectorContextRpcHandler(
   readiness?: (session: Session) => NativeDirectorReadiness,
 ): ConnectionRpcHandler {
   const bridge = createDirectorContextBridge(port)
-  type Result = DirectorContextBridgeRpcResult | NativeDraftProposalResult | NativeFirstDraftProposalResult | NativeDirectorReadiness
+  type Result = DirectorContextBridgeRpcResult | NativeDraftProposalResult | NativeFirstDraftProposalResult
+    | NativeDirectorReadiness | RelayState | null
+    | { readonly state: RelayState }
+    | { readonly state: RelayState | null; readonly recovered: boolean }
   return async (endpoint, payload, signal): Promise<RpcResult<Result>> => {
     try {
       const raw = object(payload)
@@ -117,6 +125,49 @@ export function createDirectorContextRpcHandler(
           status: 'bound', state: bridge.bindProposal(session, raw.proposal as DirectorReplayProposal),
           manualWorkAllowed: true,
         } }
+      }
+      if (endpoint === 'readRelayState') {
+        if (!exact(raw, ['sessionId'])) return bad('relay read fields invalid')
+        return { ok: true, value: readRelayBatch(session) }
+      }
+      if (endpoint === 'startRelayBatch') {
+        if (!exact(raw, ['sessionId', 'input'])) return bad('relay start fields invalid')
+        const now = new Date().toISOString()
+        const { state } = startRelayBatch(session, raw.input, now, port)
+        return { ok: true, value: { state } }
+      }
+      if (endpoint === 'admitRelayDirector') {
+        if (!exact(raw, ['sessionId', 'index', 'admission']) || !Number.isInteger(raw.index)
+          || object(raw.admission) === null) return bad('relay admission fields invalid')
+        const now = new Date().toISOString()
+        type Admission = { message: import('@deepseek-ai/dsh-session').UserMessage; contextSnapshotSha256: string }
+        const state = admitRelayDirector(session, raw.index as number, raw.admission as Admission, now)
+        return { ok: true, value: { state } }
+      }
+      if (endpoint === 'advanceRelayBatch') {
+        if (!exact(raw, ['sessionId'])) return bad('relay advance fields invalid')
+        const now = new Date().toISOString()
+        const state = advanceRelayBatch(session, now)
+        return { ok: true, value: { state } }
+      }
+      if (endpoint === 'completeRelayBatch') {
+        if (!exact(raw, ['sessionId'])) return bad('relay complete fields invalid')
+        const now = new Date().toISOString()
+        const state = completeRelayBatch(session, now)
+        return { ok: true, value: { state } }
+      }
+      if (endpoint === 'closeRelayBatch') {
+        if (!exact(raw, ['sessionId', 'reason']) || typeof raw.reason !== 'string') return bad('relay close fields invalid')
+        const now = new Date().toISOString()
+        const state = closeRelayBatch(session, raw.reason as string, now)
+        return { ok: true, value: { state } }
+      }
+      if (endpoint === 'recoverRelayBatch') {
+        if (!exact(raw, ['sessionId'])) return bad('relay recover fields invalid')
+        const recovered = recoverRelayBatch(session, port)
+        return { ok: true, value: recovered
+          ? { state: recovered.state, recovered: true }
+          : { state: null, recovered: false } }
       }
       return bad('unknown director context operation')
     } catch {

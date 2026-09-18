@@ -158,7 +158,7 @@ async function launchProductionTakeWriterFixture(
   let stderr = ''
   child.stderr.on('data', (chunk) => { stderr += String(chunk) })
   const ready = await new Promise<{ baseUrl: string; sqlitePath: string }>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Writer fixture start timed out: ${stderr}`)), 20_000)
+    const timer = setTimeout(() => { reject(new Error(`Writer fixture start timed out: ${stderr}`)) }, 20_000)
     child.once('exit', (code) => { clearTimeout(timer); reject(new Error(`Writer fixture exited ${String(code)}: ${stderr}`)) })
     child.stdout.on('data', (chunk) => {
       stdout += String(chunk)
@@ -180,7 +180,7 @@ export async function startProductionTakeWriterFixture(root: string): Promise<Wr
 
 export async function stopProductionTakeWriterFixture(fixture: WriterFixture | undefined): Promise<void> {
   if (fixture === undefined || fixture.process.exitCode !== null) return
-  const exited = new Promise<void>((resolve) => { fixture.process.once('exit', () => resolve()) })
+  const exited = new Promise<void>((resolve) => { fixture.process.once('exit', () => { resolve() }) })
   fixture.process.kill('SIGTERM')
   let timer: ReturnType<typeof setTimeout> | undefined
   await Promise.race([

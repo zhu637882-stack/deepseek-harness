@@ -99,13 +99,13 @@ export async function readNativeShotMethods(
  * @param name Exact tool name to match.
  * @returns Parsed values from successful paired results, in log order.
  */
-export function toolValues(session: Pick<Session, 'events'>, name: string): unknown[] {
+export function toolValues(session: Pick<Session, 'events'>, name: string | readonly string[]): unknown[] {
   const calls = new Map<string, { turn: number; step: number }>()
   const receipts = new Map<string, { value: JsonValue; visibleSha256: string }>()
   const results: unknown[] = []
   for (const event of session.events) {
-    if (event.type === 'tool/call' && event.data.name === name) calls.set(event.data.callId, event.data)
-    if (event.type === 'qingmu-director-dialogue/receipt' && event.data.toolName === name
+    if (event.type === 'tool/call' && (typeof name === 'string' ? event.data.name === name : name.includes(event.data.name))) calls.set(event.data.callId, event.data)
+    if (event.type === 'qingmu-director-dialogue/receipt' && (typeof name === 'string' ? event.data.toolName === name : name.includes(event.data.toolName))
       && calls.has(event.data.callId)) receipts.set(event.data.callId, event.data)
     if (event.type !== 'tool/result' || event.data.error !== undefined) continue
     for (const part of event.data.message.content) {

@@ -6247,7 +6247,7 @@ export function apply(ctx: Context, config: YimengCommandAdapterConfig = {}): vo
       })
     }
     : undefined
-  ctx.effect(() => () => interactiveController.abort(), 'qingmu Director interactive execution lifetime')
+  ctx.effect(() => () => { interactiveController.abort() }, 'qingmu Director interactive execution lifetime')
   const handler = createYimengCommandHandler(config, {
     fetch: globalThis.fetch,
     readToken: () => process.env.YIMENG_API_TOKEN,

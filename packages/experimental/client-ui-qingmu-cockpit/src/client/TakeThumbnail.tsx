@@ -8,7 +8,7 @@ let queue: Promise<unknown> = Promise.resolve()
 /** Decode a poster from an authenticated, hash-verified existing video. No generation or writes. */
 async function poster(request: YimengTakePreviewRequest, load: QingmuYimengPort['takePreview']): Promise<string> {
   const controller = new AbortController()
-  const deadline = setTimeout(() => controller.abort(), 45000)
+  const deadline = setTimeout(() => { controller.abort() }, 45000)
   let url: string | undefined
   let video: HTMLVideoElement | undefined
   try {
@@ -27,10 +27,10 @@ async function poster(request: YimengTakePreviewRequest, load: QingmuYimengPort[
     element.muted = true
     element.preload = 'auto'
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('thumbnail decode timed out')), 10000)
+      const timer = setTimeout(() => { reject(new Error('thumbnail decode timed out')) }, 10000)
       const finish = (error?: Error): void => { clearTimeout(timer); if (error) reject(error); else resolve() }
-      element.onloadeddata = () => finish()
-      element.onerror = () => finish(new Error('thumbnail decode failed'))
+      element.onloadeddata = () => { finish() }
+      element.onerror = () => { finish(new Error('thumbnail decode failed')) }
       element.src = sourceUrl
       element.load()
     })

@@ -13,7 +13,8 @@ const targetSchema = z.object({ schema: z.literal(schema), sessionId: id, ownerI
 }).strict()
 
 /** Recheck all scoped human inputs consumed in this turn, not newer still-queued messages. */
-export function assertNativeTurnTarget(session: Session, callId: CallId, recoveryOnly = false): void {
+export function assertNativeTurnTarget(session: Session, callId: CallId,
+  mode: 'current' | 'selection' | 'before-refresh' = 'current'): void {
   const marked = (content: readonly { type: string; text?: string }[]) => content[0]?.type === 'text'
     && content[0].text?.startsWith(`{"schema":"${schema}"`) === true
   // Queue editing can replace content. The original durable admission still proves
@@ -42,28 +43,33 @@ export function assertNativeTurnTarget(session: Session, callId: CallId, recover
     const decoded: unknown = JSON.parse(first.text)
     if (JSON.stringify(decoded) !== first.text) throw new Error('Noncanonical Qingmu request target.')
     const target = targetSchema.parse(decoded)
-    if (recoveryOnly) { assertNativePromptSelection(session, target); continue }
+    if (mode === 'selection') { assertNativePromptSelection(session, target); continue }
     // Only a successful Host-recorded save in THIS consumed turn can advance
     // its context. A queued old request or chat-authored receipt cannot retarget.
     let hash = target.contextSnapshotSha256
-    if (currentState(session)?.binding.contextSnapshotSha256 === hash) {
-      assertNativePromptTarget(session, target)
-      continue
-    }
+    const admitted = new Set([hash])
     const consumed = { events: session.events.filter(item => item.seq > start.seq && item.seq < call.seq) }
-    for (const value of toolValues(consumed, 'qingmu_commit_dialogue_edit')) {
+    for (const value of toolValues(consumed, ['qingmu_commit_dialogue_edit', 'qingmu_save_director_plan'])) {
       const saved = value as {
         schema?: string
         scope?: unknown
         result?: { recovered?: boolean }
         continuation?: { before: string; after: string }
       }
-      if (saved.schema === 'qingmu.native-dialogue-committed.v1'
+      if (['qingmu.native-dialogue-committed.v1', 'qingmu.native-director-plan-saved.v1'].includes(saved.schema ?? '')
         && saved.result?.recovered === false
         && saved.scope !== null && typeof saved.scope === 'object'
         && Object.entries(target.scope).every(([key, value]) => (saved.scope as Record<string, unknown>)[key] === value)
-        && saved.continuation?.before === hash && /^[0-9a-f]{64}$/u.test(saved.continuation.after)) hash = saved.continuation.after
+        && saved.continuation?.before === hash && /^[0-9a-f]{64}$/u.test(saved.continuation.after)) {
+        hash = saved.continuation.after
+        admitted.add(hash)
+      }
     }
+    // Saving does not update the browser binding. It may still be at any earlier
+    // receipt in this turn. Allow that binding only to enter the authoritative
+    // refresh; the post-read check must match the latest successful save exactly.
+    const boundHash = currentState(session)?.binding.contextSnapshotSha256
+    if (mode === 'before-refresh' && boundHash && admitted.has(boundHash)) hash = boundHash
     assertNativePromptTarget(session, { ...target, contextSnapshotSha256: hash })
   }
   if (!found) missing()

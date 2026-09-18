@@ -80,9 +80,9 @@ describe.skipIf(process.env.DSH_CLIENT_BUILD_PROFILE !== 'qingmu' || !writerRoot
       const server = child
       return await new Promise<Fixture>((resolve, reject) => {
         let output = ''; let stderr = ''
-        const timer = setTimeout(() => reject(new Error(
+        const timer = setTimeout(() => { reject(new Error(
           `FastAPI entity-review fixture readiness timed out: ${stderr.slice(-3000)}`,
-        )), 35_000)
+        )) }, 35_000)
         server.stderr?.on('data', (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-6000) })
         server.once('error', (error) => { clearTimeout(timer); reject(error) })
         server.once('exit', (code) => {

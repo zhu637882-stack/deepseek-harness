@@ -108,7 +108,7 @@ it('retracts mount status offline, ignores old responses, and rechecks on each h
   fireEvent.click(screen.getByRole('button', { name: '重新检查连接' }))
   await act(async () => { f.transport.publish(false); finish(mounted) })
   expect(screen.queryByText(/4 项青木导演工具已挂载/)).toBeNull()
-  expect((screen.getByRole('button', { name: '进入 / 恢复青木导演' }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '进入 / 恢复青木导演' }).disabled).toBe(true)
   read.mockResolvedValue({ status: 'inactive', presetId: null, tools: [], missingTools: mounted.tools })
   act(() => { f.transport.publish(true) })
   await screen.findByText(/当前会话尚未运行/)

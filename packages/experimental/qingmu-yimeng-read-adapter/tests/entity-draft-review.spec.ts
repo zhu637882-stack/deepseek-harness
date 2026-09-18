@@ -7,6 +7,9 @@ import { registerEntityDraftReviewRead } from '../src/entity-draft-review.ts'
 let server: Server | undefined
 let dispose: (() => void) | undefined
 
+const requestUrl = (input: string | URL | Request): string =>
+  typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+
 afterEach(async () => {
   dispose?.(); dispose = undefined
   if (server !== undefined) {
@@ -76,7 +79,7 @@ function state() {
 describe('PromptIR entity-draft review read bridge', () => {
   it('forwards only the browser cookie and validates current authority', async () => {
     const upstream = vi.fn<typeof globalThis.fetch>(async (input, init) => {
-      expect(new URL(input instanceof URL ? input.href : String(input)).pathname).toContain(
+      expect(new URL(requestUrl(input)).pathname).toContain(
         '/prompt-irs/prompt-review/entity-drafts/review',
       )
       const headers = new Headers(init?.headers)

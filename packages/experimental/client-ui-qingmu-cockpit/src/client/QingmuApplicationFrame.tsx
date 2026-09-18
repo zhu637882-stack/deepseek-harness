@@ -52,16 +52,16 @@ export function QingmuApplicationFrame({ projects, episodes, projectId, episodeI
       <div className={css.identity}>
         <span className={css.brand}><svg viewBox="0 0 28 32" aria-hidden="true"><path d="M14 3v26M14 7 5 14m9-7 9 7M14 15 3 24m11-9 11 9M9 29h10" /></svg><span>青木<small>QINGMU OS</small></span></span>
         <div className={css.project}>
-          <select aria-label="项目" value={projectId} disabled={loading || scopeLocked || !projects.length} onChange={e => onProject(e.target.value)}>
+          <select aria-label="项目" value={projectId} disabled={loading || scopeLocked || !projects.length} onChange={(e) => { onProject(e.target.value) }}>
             {!projects.length && <option value="">选择项目</option>}{projects.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
-          <select aria-label="剧集" value={episodeId} disabled={loading || scopeLocked || !episodes.length} onChange={e => onEpisode(e.target.value)}>
+          <select aria-label="剧集" value={episodeId} disabled={loading || scopeLocked || !episodes.length} onChange={(e) => { onEpisode(e.target.value) }}>
             {!episodes.length && <option value="">选择剧集</option>}{episodes.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
           </select>
         </div>
       </div>
       <nav className={css.workflow} aria-label="创作流程">{steps.map(([id, label], index) => <button type="button" key={id}
-        aria-current={step === id ? 'step' : undefined} onClick={() => onStep(id)}><small>{String(index + 1).padStart(2, '0')}</small><span>{label}</span></button>)}</nav>
+        aria-current={step === id ? 'step' : undefined} onClick={() => { onStep(id) }}><small>{String(index + 1).padStart(2, '0')}</small><span>{label}</span></button>)}</nav>
       <div className={css.tools}>
         <button type="button" onClick={onRefresh} disabled={loading} aria-label="刷新页面">{loading ? '刷新中…' : '刷新'}</button>
         {(!scopeLocked || onOpenTools) && <div className={css.moreTools}>

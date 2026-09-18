@@ -19,7 +19,7 @@ function pendingValid(value: ScenePlanningRequest | undefined,
     && typeof value.request.expectedScriptSha256 === 'string' && Number.isSafeInteger(value.request.expectedStoryboardRevision)
     && typeof value.request.expectedStoryboardSha256 === 'string'
 }
-function stored(keyName: string): Draft | null { try { const value = JSON.parse(localStorage.getItem(keyName) ?? 'null') as Draft; return typeof value?.imagePromptCn === 'string' && typeof value?.shotId === 'string' ? value : null } catch { return null } }
+function stored(keyName: string): Draft | null { try { const value = JSON.parse(localStorage.getItem(keyName) ?? 'null') as Draft; return typeof value.imagePromptCn === 'string' && typeof value.shotId === 'string' ? value : null } catch { return null } }
 function sameScope(state: ScenePlanningState, projectId: string, episodeId: string, shotId: string): boolean {
   return state.projectId === projectId && state.episodeId === episodeId
     && state.canonicalStoryboard?.shots?.some(shot => shot.id === shotId) === true
@@ -55,7 +55,7 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
         setError('尚未找到本镜对应的首帧要求，请到分镜工作区核对后重试。'); setLoad('failed')
       }
     }).catch(() => { if (!controller.signal.aborted && currentEpoch === epoch.current) { setError('首帧要求暂不可读取；不会创建或替换素材。'); setLoad('failed') } })
-    return () => controller.abort()
+    return () => { controller.abort() }
   }, [episodeId, port, projectId, shotId, storageKey])
   const update = (next: Draft): void => { try { localStorage.setItem(storageKey, JSON.stringify(next)); setDraft(next) } catch { setError('浏览器无法保留本镜草稿；请复制文字后再保存。') } }
   async function save(recover: boolean): Promise<void> {
@@ -81,13 +81,12 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
       const next = await read({ projectId, episodeId })
       if (runEpoch !== epoch.current) return
       if (result.action !== 'edit_automatic' || result.projectId !== projectId || result.episodeId !== episodeId
-        || result.shotId !== shotId || result.idempotencyKey !== pending.idempotencyKey || result.providerCalls !== 0
-        || result.stageStarted || result.approvalGranted || next.canonicalStoryboard === null
+        || result.shotId !== shotId || result.idempotencyKey !== pending.idempotencyKey || next.canonicalStoryboard === null
         || next.canonicalStoryboard === undefined || next.canonicalStoryboard.revision < result.storyboard.version
         || (next.canonicalStoryboard.revision === result.storyboard.version
           && next.canonicalStoryboard.sourceHash !== result.storyboard.sourceHash)
         || !sameScope(next, projectId, episodeId, shotId)) throw new Error('receipt scope mismatch')
-      const saved = next.canonicalStoryboard?.shots?.find(shot => shot.id === shotId)
+      const saved = next.canonicalStoryboard.shots?.find(shot => shot.id === shotId)
       if (saved === undefined) throw new Error('receipt shot missing')
       localStorage.removeItem(storageKey); setDraft({ shotId, imagePromptCn: saved.imagePromptCn, blocking: saved.blocking ?? '', cameraAngle: saved.cameraAngle ?? '' }); setState(next); await onCommitted()
     } catch { if (runEpoch === epoch.current) setError('尚未确认是否保存成功。草稿已保留，请查看原保存结果，不要重复保存。') } finally { if (runEpoch === epoch.current) setBusy(false) }
@@ -105,10 +104,11 @@ export function AutomaticFrameRequirementsEditor({ projectId, episodeId, shotId,
       {field === 'blocking' ? '动作' : '机位'}
       <textarea aria-label={field === 'blocking' ? '动作' : '机位'} rows={field === 'blocking' ? 3 : 2}
         maxLength={2000} value={draft[field] ?? ''} disabled={busy || draft.pending !== undefined}
-        onChange={event => update({ ...draft, [field]: event.target.value })} />
+        onChange={(event) => { update({ ...draft, [field]: event.target.value }) }} />
     </label>)}
     <label>画面要求<textarea aria-label="画面要求" rows={7} maxLength={20000} value={draft.imagePromptCn}
-      disabled={busy || draft.pending !== undefined} onChange={event => update({ ...draft, imagePromptCn: event.target.value })} /></label>
+      disabled={busy || draft.pending !== undefined}
+      onChange={(event) => { update({ ...draft, imagePromptCn: event.target.value }) }} /></label>
     <p role="status">{draft.pending ? '正在核实上次保存，草稿已保留。' : dirty ? '有未保存修改 · 已保留在此浏览器' : '当前要求已保存'}</p>
     {error && <p role="alert">{error}</p>}
     {(dirty || busy) && !draft.pending && <button type="button" disabled={busy || !draft.imagePromptCn.trim()} onClick={() => { void save(false) }}>{busy ? '正在保存…' : '保存当前要求'}</button>}

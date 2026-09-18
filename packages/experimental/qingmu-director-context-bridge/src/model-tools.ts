@@ -255,7 +255,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         if (!exec.agent) throw new Error('A native director session is required.')
         // Recovery is read-only and must still be possible after this command
         // changed the context. A fresh commit below rechecks the full old input.
-        assertNativeTurnTarget(exec.agent.session, exec.callId, true)
+        assertNativeTurnTarget(exec.agent.session, exec.callId, 'selection')
         const stage = findStagedDialogue(exec.agent.session, args.receiptId)
         const state = currentState(exec.agent.session)
         if (!state || JSON.stringify(state.binding.scope) !== JSON.stringify(stage.scope)) throw new Error('当前镜头已切换，未提交。')
@@ -274,7 +274,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         let continuation: { before: string; after: string } | null = null
         try {
           const refreshed = await ctx.qingmuYimengCommand('readDirectorContext', stage.scope, exec.signal)
-          assertNativeTurnTarget(exec.agent.session, exec.callId, true)
+          assertNativeTurnTarget(exec.agent.session, exec.callId, 'selection')
           if (refreshed.ok && result.recovered === false) continuation = dialogueContinuation(
             findNativeDialogueInput(exec.agent.session, stage.inputReceiptId), stage, result,
             refreshed.value as DirectorContextSnapshot)

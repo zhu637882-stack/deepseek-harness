@@ -8,6 +8,7 @@ import type {
 import type { JsonValue, Session } from '@deepseek-ai/dsh-session'
 import type { ImagoDirectorInstructionsResponse } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type { YimengPromptIrResponse, YimengPromptIrBootstrapResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import type { RelayState } from './relay-state.ts'
 
 /** Full current upstream and C5 read before authoring the first prompt; no invented Ready baseline. */
 export interface NativeFirstDraftInput {
@@ -249,10 +250,37 @@ export interface DirectorContextClientPort {
     readonly state: DirectorContextBindingState
     readonly manualWorkAllowed: true
   }>
+  /** Read the latest relay ledger without side effects. */
+  readRelayState?(sessionId: string, signal?: AbortSignal): Promise<RelayState | null>
+  /** Start a new relay batch, claiming the Host lease. */
+  startRelayBatch?(sessionId: string, input: unknown, signal?: AbortSignal): Promise<{ readonly state: RelayState }>
+  /** Admit one director request to a pending item. */
+  admitRelayDirector?(
+    sessionId: string, index: number,
+    admission: { message: import('@deepseek-ai/dsh-session').UserMessage; contextSnapshotSha256: string },
+    signal?: AbortSignal,
+  ): Promise<{ readonly state: RelayState }>
+  /** Pause a batch when no director admissions exist yet. */
+  advanceRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<{ readonly state: RelayState }>
+  /** Complete a batch where all items have terminal evidence. */
+  completeRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<{ readonly state: RelayState }>
+  /** Close a batch that cannot continue, abandoning non-settled items. */
+  closeRelayBatch?(sessionId: string, reason: string, signal?: AbortSignal): Promise<{ readonly state: RelayState }>
+  /** Cold-recover an open relay batch by re-claiming the Host lease. */
+  recoverRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<{
+    readonly state: RelayState | null
+    readonly recovered: boolean
+  }>
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
+    /** Required whole-state relay ledger; readiness and reservation never imply approval or successful flush. */
+    'qingmu-director-relay/state': RelayState
+    /** Complete auxiliary model input, including durable image references. */
+    'qingmu-director-vision/request': { readonly callId: string; readonly inspectionId: string; readonly assetSha256: string; readonly request: JsonValue }
+    /** Visual observations and measured usage, never creative or adoption approval. */
+    'qingmu-director-vision/result': { readonly callId: string; readonly inspectionId: string; readonly status: 'completed' | 'failed'; readonly report: string | null; readonly usage: import('@deepseek-ai/dsh-llm').TokenUsage | null; readonly completionId: string | null; readonly error: string | null }
     /** Whole-value, log-only binding; null clears an obsolete object before switch I/O. */
     'qingmu-director-context/state': DirectorContextBindingState | null
     /** A UI view of a native tool operation, never a second business ledger. */
@@ -269,11 +297,14 @@ declare module '@deepseek-ai/dsh-session/types' {
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionStateMap {
+    'qingmuDirectorRelay': RelayState | null
     'qingmuDirectorContext': DirectorContextBindingState | null
     'qingmuDialogueExecution': NativeDialogueExecution | null
   }
 
   interface SessionProjectionMap {
+    /** Latest validated relay ledger; null means no batch has been recorded. */
+    'qingmuDirectorRelay': RelayState | null
     /** Future Qingmu UI mount point; absent package capability is distinct from an unbound null value. */
     'qingmuDirectorContext': DirectorContextBindingProjection
     'qingmuDialogueExecution': NativeDialogueExecution | null

@@ -50,7 +50,7 @@ function assertFrameReview(value: unknown, frameId: string): FrameReview {
   const item = value as FrameReview
   if (item.frameId !== frameId || typeof item.frameDigest !== 'string' || !/^[a-f0-9]{64}$/.test(item.frameDigest)
     || typeof item.accepted !== 'boolean' || typeof item.title !== 'string' || typeof item.imagePromptCn !== 'string'
-    || typeof item.preflight?.technicalReady !== 'boolean') throw new Error('本镜签收修订不完整')
+    || typeof (item.preflight as { readonly technicalReady?: unknown } | undefined)?.technicalReady !== 'boolean') throw new Error('本镜签收修订不完整')
   return item
 }
 const sha = /^[a-f0-9]{64}$/
@@ -96,11 +96,11 @@ function assertAttempt(value: unknown, scope: ShootingFrameScope, requestId: str
   if (!scoped(value, scope) || value.schema !== 'qingmu.shooting-first-frame-state.v1' || value.requestId !== requestId
     || !('task' in value) || !('candidate' in value)) throw new Error('原任务回读与当前镜头不一致')
   if (value.task !== null) {
-    const task = value.task as Record<string, unknown>
+    const task = value.task as Record<string, unknown> | undefined
     if (!task || typeof task.id !== 'string' || typeof task.kernel_status !== 'string') throw new Error('任务状态不完整')
   }
   if (value.candidate !== null) {
-    const candidate = value.candidate as Record<string, unknown>
+    const candidate = value.candidate as Record<string, unknown> | undefined
     if (!candidate || typeof candidate.assetId !== 'string' || typeof candidate.sha256 !== 'string' || !sha.test(candidate.sha256)
       || typeof candidate.browserUrl !== 'string' || typeof candidate.isSelected !== 'boolean'
       || typeof candidate.qualityStatus !== 'string') throw new Error('候选回执不完整')
@@ -171,8 +171,8 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
     const controller = new AbortController()
     void request(`review?${reviewQuery}`, undefined, controller.signal)
       .then((value) => { if (!controller.signal.aborted) setReview(assertFrameReview(value, scope.frameId)) })
-      .catch((cause) => { if (!controller.signal.aborted) setError(String(cause)) })
-    return () => controller.abort()
+      .catch((cause: unknown) => { if (!controller.signal.aborted) setError(String(cause)) })
+    return () => { controller.abort() }
   }, [key])
   useEffect(() => {
     const controller = new AbortController()
@@ -193,7 +193,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
       finally { if (!controller.signal.aborted) setBusy(false) }
     }
     void load()
-    return () => controller.abort()
+    return () => { controller.abort() }
   }, [key])
   useEffect(() => {
     if (!requestId) return
@@ -279,7 +279,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
   return <section aria-label="首帧生成" className={css.generation} aria-busy={busy}>
     <div className={css.preview}>
       {attempt?.candidate && (!review || review.accepted) ? <figure>
-        <img src={attempt.candidate.browserUrl} alt="镜头新首帧 · 待你定版" onLoad={() => setLoadedImage(imageKey)} onError={() => setLoadedImage(undefined)} />
+        <img src={attempt.candidate.browserUrl} alt="镜头新首帧 · 待你定版" onLoad={() => { setLoadedImage(imageKey) }} onError={() => { setLoadedImage(undefined) }} />
         <figcaption>{attempt.candidate.isSelected ? '当前选用首帧' : '新首帧候选 · 待你审看，尚未采用'}</figcaption>
       </figure> : <div className={css.preparation}>
         {review && !review.accepted ? <div aria-label="本镜分镜确认">
@@ -298,7 +298,8 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
       {attempt?.canRegenerate === true && !busy && <button type="button" onClick={() => {
         if (lock.current) return
         lock.current = true; setBusy(true); setError('')
-        void prepareAgain(true).catch(cause => setError(String(cause))).finally(() => { lock.current = false; setBusy(false) })
+        void prepareAgain(true).catch((cause: unknown) => { setError(String(cause)) })
+          .finally(() => { lock.current = false; setBusy(false) })
       }}>重新生成首帧</button>}
       {review && !review.accepted && <>
         {confirming ? <p role="status">正在保存你的本镜确认…</p>
@@ -308,7 +309,7 @@ export function ShootingFirstFrame({ scope, onCommitted, onCandidatePreview }: {
       <button type="button" onClick={() => {
         if (lock.current) return
         lock.current = true; setBusy(true)
-        void prepareAgain().catch(cause => setError(String(cause))).finally(() => { lock.current = false; setBusy(false) })
+        void prepareAgain().catch((cause: unknown) => { setError(String(cause)) }).finally(() => { lock.current = false; setBusy(false) })
       }}>重新检查本镜生成条件</button>}
       {!attempt?.candidate && !blocked && !requestId && !busy && preview?.blockers.length === 0 && review?.accepted === true && <button className={css.primary} type="button" onClick={() => { void submit() }}>生成这张首帧（仅一次）</button>}
     </div>

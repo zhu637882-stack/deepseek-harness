@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
 import { directorContextBindingProjectionDefinition } from './projection.ts'
 import { nativeDialogueProjection } from './dialogue-projection.ts'
+import { relayStateProjectionDefinition } from './relay-projection.ts'
 import { createDirectorContextRpcHandler } from './rpc.ts'
 import { readNativeDirectorReadiness } from './native-readiness.ts'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
@@ -12,6 +13,8 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 export { createDirectorContextBridge } from './bridge.ts'
 export { createDirectorContextRpcHandler } from './rpc.ts'
 export { directorContextBindingProjectionDefinition, directorContextBindingStateSchema } from './projection.ts'
+export { relayStateProjectionDefinition } from './relay-projection.ts'
+export { readRelayBatch, startRelayBatch, admitRelayDirector, advanceRelayBatch, completeRelayBatch, closeRelayBatch, recoverRelayBatch } from './relay-controller.ts'
 export type * from './types.ts'
 
 /** Cordis plugin name. */
@@ -30,6 +33,7 @@ declare module '@deepseek-ai/cordis' {
 export function apply(ctx: Context): void {
   ctx.sessionProjections.register(directorContextBindingProjectionDefinition)
   ctx.sessionProjections.register(nativeDialogueProjection)
+  ctx.sessionProjections.register(relayStateProjectionDefinition)
   ctx.inject(['connection', 'sessions', 'qingmuYimengCommand'], (host) => {
     const port = {
       readDirectorContext: async (scope: import('./types.ts').DirectorObjectScope, signal?: AbortSignal) => {

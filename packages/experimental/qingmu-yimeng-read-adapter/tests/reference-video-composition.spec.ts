@@ -14,7 +14,7 @@ import * as Commands from '../../qingmu-yimeng-command-adapter/src/index.ts'
 import { request, response, savedDraft, quoteRequest, quoteResponse, runRequest, runResponse } from './reference-video-fixture.ts'
 
 it('loads the actual Host, Connection and read plugin through YAML and serves a verified request preview', async () => {
-  const requests: { url?: string; method?: string; authorization?: string; body: string }[] = []
+  const requests: { url?: string | undefined; method?: string | undefined; authorization?: string | undefined; body: string }[] = []
   const upstream = createServer(async (req, res) => {
     let body = ''
     for await (const chunk of req) body += String(chunk)

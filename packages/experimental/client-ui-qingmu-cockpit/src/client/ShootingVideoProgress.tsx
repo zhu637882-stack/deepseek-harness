@@ -62,7 +62,7 @@ export function ShootingVideoProgress({ scope, onState, onCommitted }: {
     {state?.taskId && !['Succeeded', 'Failed', 'Cancelled'].includes(state.kernelStatus ?? '') && !busy && <button onClick={() => {
       if (lock.current) return
       lock.current = true; setBusy(true); setError('')
-      void read(true).catch(cause => setError(String(cause))).finally(() => { lock.current = false; setBusy(false) })
+      void read(true).catch((cause: unknown) => { setError(String(cause)) }).finally(() => { lock.current = false; setBusy(false) })
     }}>继续原视频任务</button>}
     {state && state.takeCount >= 2 && <p>本镜已达两次生成上限，不再自动返修。</p>}
     {error && <p role="alert">{error}</p>}

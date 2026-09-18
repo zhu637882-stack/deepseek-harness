@@ -635,6 +635,10 @@ function makePort(overrides: Partial<QingmuYimengPort> = {}): QingmuYimengPort {
     referenceVideoRuns: vi.fn<QingmuYimengPort['referenceVideoRuns']>(async request => ({ schema: 'jason.reference-video-runs.v1',
       ...request, items: [], providerCalls: 0 })),
     referenceVideoAssets: vi.fn<QingmuYimengPort['referenceVideoAssets']>(async request => ({ ...request, page: 1, pages: 1, items: [] })),
+    referenceVideoPreview: vi.fn(async () => { throw new Error('Reference video preview uses a separate fixture') }),
+    referenceVideoQuote: vi.fn(async () => { throw new Error('Reference video quote uses a separate fixture') }),
+    saveReferenceVideoDraft: vi.fn(async () => { throw new Error('Reference video save uses a separate fixture') }),
+    queueReferenceVideo: vi.fn(async () => { throw new Error('Reference video generation uses a separate fixture') }),
     queueProductionTake: vi.fn(async () => { throw new Error('Production Take uses a separate fixture') }),
     readCreativeContract: vi.fn<QingmuYimengPort['readCreativeContract']>(async request => ({ schema: 'jason.qingmu-creative-contract-state.v1' as const,
       projectId: request.projectId, configured: false, locked: false, revision: null, sha256: null,
@@ -930,33 +934,40 @@ afterEach(() => {
 
 describe('embedded Qingmu entry scope', () => {
   it('occupies the application instead of opening a cockpit over the conversation', async () => {
-    const port = makePort()
+    const workflow = vi.fn(async () => WORKFLOW)
+    const commitScript = vi.fn(async () => COMMIT)
+    const createHumanDecision = vi.fn(async () => { throw new Error('HumanDecision is not part of this fixture') })
+    const selectTakeVersion = vi.fn(async () => { throw new Error('Take selection is not part of this fixture') })
+    const port = makePort({ workflow, commitScript, createHumanDecision, selectTakeVersion })
     mount(port, undefined, true)
     const navigation = screen.getByRole('navigation', { name: '创作流程' })
     expect(within(navigation).getAllByRole('button')).toHaveLength(5)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.queryByRole('button', { name: zh.trigger })).toBeNull()
-    await waitFor(() => { expect(port.workflow).toHaveBeenCalled() })
+    await waitFor(() => { expect(workflow).toHaveBeenCalled() })
     expect(document.getElementById('root')?.hasAttribute('inert')).toBe(false)
     fireEvent.click(within(navigation).getByRole('button', { name: /故事/ }))
     expect(await screen.findByRole('heading', { name: '故事与剧本' })).toBeTruthy()
     expect(new URLSearchParams(location.search).get('qingmuView')).toBe('story')
     fireEvent.click(within(navigation).getByRole('button', { name: /拍摄与审看/ }))
     expect(screen.getByRole('navigation', { name: '创作流程' })).toBe(navigation)
-    expect(port.commitScript).not.toHaveBeenCalled()
-    expect(port.createHumanDecision).not.toHaveBeenCalled()
-    expect(port.selectTakeVersion).not.toHaveBeenCalled()
+    expect(commitScript).not.toHaveBeenCalled()
+    expect(createHumanDecision).not.toHaveBeenCalled()
+    expect(selectTakeVersion).not.toHaveBeenCalled()
   })
 
   it('restores the chosen creative step on reload without adopting or submitting', async () => {
     history.replaceState({}, '', '/?qingmuView=story')
-    const port = makePort()
+    const workflow = vi.fn(async () => WORKFLOW)
+    const commitScript = vi.fn(async () => COMMIT)
+    const createHumanDecision = vi.fn(async () => { throw new Error('HumanDecision is not part of this fixture') })
+    const port = makePort({ workflow, commitScript, createHumanDecision })
     mount(port, undefined, true)
     expect(await screen.findByRole('heading', { name: '故事与剧本' })).toBeTruthy()
-    await waitFor(() => { expect(port.workflow).toHaveBeenCalled() })
+    await waitFor(() => { expect(workflow).toHaveBeenCalled() })
     expect(screen.getByRole('button', { name: /01故事/ }).getAttribute('aria-current')).toBe('step')
-    expect(port.commitScript).not.toHaveBeenCalled()
-    expect(port.createHumanDecision).not.toHaveBeenCalled()
+    expect(commitScript).not.toHaveBeenCalled()
+    expect(createHumanDecision).not.toHaveBeenCalled()
   })
 
   it('decodes only a complete, bounded project and episode handoff', () => {
@@ -1368,7 +1379,7 @@ describe('QingmuCockpit journey', () => {
       expect(dialog.querySelector('[data-shot-id="frame-1"]')).toBeTruthy()
     })
     const scopedKeys = storageWrite.mock.calls.every(([key]) =>
-      /^qingmu:cockpit:shooting-workspace:v1:project-1:episode-1:(shot|tab)$/.test(String(key)))
+      /^qingmu:cockpit:shooting-workspace:v1:project-1:episode-1:(shot|tab)$/.test(key))
     expect(scopedKeys).toBe(true)
   })
 

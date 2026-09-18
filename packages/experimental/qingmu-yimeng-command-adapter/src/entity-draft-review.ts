@@ -49,7 +49,7 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown> | und
   const chunks: Buffer[] = []
   let size = 0
   for await (const value of req) {
-    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
+    const chunk = Buffer.from(value as Uint8Array)
     size += chunk.length
     if (size > declared) return undefined
     chunks.push(chunk)

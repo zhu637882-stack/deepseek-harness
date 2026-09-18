@@ -3,9 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest'
 import { ReferenceVideoRuns } from '../src/client/ReferenceVideoRuns.tsx'
 import { quoteResponse, runResponse } from '../../qingmu-yimeng-read-adapter/tests/reference-video-fixture.ts'
-import type { QueueReferenceVideoRequest, ReferenceVideoRun } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import type { QueueReferenceVideoRequest, ReferenceVideoQuoteResponse, ReferenceVideoRun } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 const scope = { projectId: 'p', frameId: 'f' }
 const key = 'qingmu.reference-submit:p:f'
+const quote = quoteResponse as unknown as ReferenceVideoQuoteResponse
 function ports(items: ReferenceVideoRun[] = []) {
   return {
     referenceVideoRuns: vi.fn(async () => ({ schema: 'jason.reference-video-runs.v1' as const, ...scope, items, providerCalls: 0 as const })),
@@ -16,7 +17,7 @@ afterEach(() => { cleanup(); sessionStorage.clear(); vi.restoreAllMocks() })
 it('keeps generation paused after an unreadable local receipt even when status refresh succeeds', async () => {
   sessionStorage.setItem(key, '{invalid')
   const port = ports()
-  render(<ReferenceVideoRuns {...scope} port={port} quote={quoteResponse} />)
+  render(<ReferenceVideoRuns {...scope} port={port} quote={quote} />)
   await screen.findByRole('alert')
   fireEvent.click(screen.getByRole('button', { name: '刷新任务状态' }))
   await waitFor(() => expect(port.referenceVideoRuns).toHaveBeenCalledTimes(2))
@@ -28,20 +29,20 @@ it('requires a quote, then confirms exactly its cost and version once despite re
   const view = render(<ReferenceVideoRuns {...scope} port={port} />)
   await waitFor(() => expect(port.referenceVideoRuns).toHaveBeenCalledOnce())
   expect(screen.getByRole('button', { name: '生成 1 个视频' }).hasAttribute('disabled')).toBe(true)
-  view.rerender(<ReferenceVideoRuns {...scope} port={port} quote={quoteResponse} />)
+  view.rerender(<ReferenceVideoRuns {...scope} port={port} quote={quote} />)
   const button = screen.getByRole('button', { name: '生成 1 个视频 · 上限 ¥4.80' })
   fireEvent.click(button); fireEvent.click(button)
   await screen.findByText('已登记这次生成，可刷新查看进度。')
   expect(port.queueReferenceVideo).toHaveBeenCalledOnce()
   expect(port.queueReferenceVideo.mock.calls[0]?.[0]).toMatchObject({ ...scope, paidConfirmed: true,
-    quoteSha256: quoteResponse.quoteSha256, expectedRevision: quoteResponse.draftRevision,
-    authorizationCapCny: quoteResponse.cost.estimatedCny })
+    quoteSha256: quote.quoteSha256, expectedRevision: quote.draftRevision,
+    authorizationCapCny: quote.cost.estimatedCny })
   expect(sessionStorage.getItem(key)).toBeNull()
   expect(screen.getByRole('button', { name: '生成 1 个视频 · 上限 ¥4.80' }).hasAttribute('disabled')).toBe(true)
 })
 it('retains an uncertain command across remount and explicitly replays the same id and quote', async () => {
   const port = ports(); port.queueReferenceVideo.mockRejectedValueOnce(new Error('lost response'))
-  const view = render(<ReferenceVideoRuns {...scope} port={port} quote={quoteResponse} />)
+  const view = render(<ReferenceVideoRuns {...scope} port={port} quote={quote} />)
   await waitFor(() => expect(screen.getByRole('button', { name: '生成 1 个视频 · 上限 ¥4.80' }).hasAttribute('disabled')).toBe(false))
   fireEvent.click(screen.getByRole('button', { name: '生成 1 个视频 · 上限 ¥4.80' }))
   await screen.findByText('提交结果尚未确认。先刷新状态；再次确认会使用同一个请求编号。')
@@ -58,7 +59,7 @@ it('finds a previously acknowledged run on reload and never repeats its POST', a
     expectedRequestSha256: 'a'.repeat(64), quoteSha256: runResponse.quoteSha256, authorizationCapCny: runResponse.authorizationCapCny }
   sessionStorage.setItem(key, JSON.stringify(command))
   const port = ports([runResponse])
-  render(<ReferenceVideoRuns {...scope} port={port} quote={quoteResponse} />)
+  render(<ReferenceVideoRuns {...scope} port={port} quote={quote} />)
   await screen.findByText('草稿版本 1 · 等待生成')
   expect(sessionStorage.getItem(key)).toBeNull()
   expect(port.queueReferenceVideo).not.toHaveBeenCalled()
@@ -67,7 +68,7 @@ it('plays returned candidates without adoption and blocks new requests while a r
   const completed: ReferenceVideoRun = { ...runResponse, kernelStatus: 'Succeeded', publicStatus: 'succeeded',
     candidates: [{ assetId: 'asset_video', assetSha256: 'c'.repeat(64), mediaId: 'media_video', browserUrl: '/fixture.mp4', reviewStatus: 'pending' }] }
   const port = ports([completed])
-  render(<ReferenceVideoRuns {...scope} port={port} quote={quoteResponse} />)
+  render(<ReferenceVideoRuns {...scope} port={port} quote={quote} />)
   expect(await screen.findByLabelText('草稿版本 1 候选视频')).toHaveProperty('tagName', 'VIDEO')
   expect(screen.queryByRole('button', { name: /采用/ })).toBeNull()
   port.referenceVideoRuns.mockResolvedValue({ schema: 'jason.reference-video-runs.v1', ...scope,

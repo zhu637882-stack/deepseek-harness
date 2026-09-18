@@ -11,9 +11,9 @@ vi.mock('../src/client/ShootingFirstFrame.tsx', () => ({ ShootingFirstFrame: ({ 
 vi.mock('../src/client/ShootingFirstFrameHistory.tsx', () => ({ ShootingFirstFrameHistory: () => <section aria-label="本镜首帧候选">真实历史候选</section> }))
 const bytes = Buffer.from('existing video')
 const sha = createHash('sha256').update(bytes).digest('hex')
+const shot = (i: number) => ({ shotId: `f${i + 1}`, frameNo: i + 1, title: `剧情${i + 1}`, dialogueRhythm: { cues: [] } })
 const projection = {
-  director: { shotRelations: { shots: Array.from({ length: 10 }, (_, i) => ({ shotId: `f${i + 1}`, frameNo: i + 1, title: `剧情${i + 1}` })) },
-    heroFrameStoryboards: { shots: [] } },
+  director: { shotRelations: { shots: Array.from({ length: 10 }, (_, i) => shot(i)) }, heroFrameStoryboards: { shots: [] } },
 }
 const props = () => ({ projectName: '落日公路', episodeName: 'EP1', projectId: 'p', episodeId: 'e',
   selectedShotId: 'f1', projection: projection as never, onSelectShotId: vi.fn(), onNavigate: vi.fn(),
@@ -37,12 +37,12 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 it('keeps the playing candidate across background workflow refreshes', async () => {
   const p = props(); const view = render(<ShootingReviewWorkspace {...p} />)
-  await waitFor(() => expect(view.container.querySelector('video')).not.toBeNull())
+  await waitFor(() => { expect(view.container.querySelector('video')).not.toBeNull() })
   fireEvent.click(screen.getByRole('button', { name: /视频候选 v1.*检查未通过/ }))
-  await waitFor(() => expect(view.container.querySelector('video')?.getAttribute('aria-label')).toContain('v1'))
+  await waitFor(() => { expect(view.container.querySelector('video')?.getAttribute('aria-label')).toContain('v1') })
   const playing = view.container.querySelector('video')
   view.rerender(<ShootingReviewWorkspace {...p} projection={structuredClone(projection) as never} />)
-  await waitFor(() => expect(screen.getByRole('button', { name: /视频候选 v1.*检查未通过/ }).getAttribute('aria-pressed')).toBe('true'))
+  await waitFor(() => { expect(screen.getByRole('button', { name: /视频候选 v1.*检查未通过/ }).getAttribute('aria-pressed')).toBe('true') })
   expect(view.container.querySelector('video')).toBe(playing)
 })
 
@@ -79,7 +79,7 @@ it('exposes rework for every shot without selecting or generating, and candidate
   const p = props(); const view = render(<ShootingReviewWorkspace {...p} />)
   for (let n = 1; n <= 10; n++) {
     view.rerender(<ShootingReviewWorkspace {...p} selectedShotId={`f${n}`} />)
-    await waitFor(() => expect(view.container.querySelector('video')?.getAttribute('aria-label')).toContain('v2'))
+    await waitFor(() => { expect(view.container.querySelector('video')?.getAttribute('aria-label')).toContain('v2') })
     fireEvent.click(screen.getByRole('button', { name: '重新生成视频' }))
     expect(p.onProductionAction).toHaveBeenLastCalledWith('video', `f${n}`)
     fireEvent.click(screen.getByRole('button', { name: '生成首帧' }))

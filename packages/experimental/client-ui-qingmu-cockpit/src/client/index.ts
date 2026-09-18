@@ -150,7 +150,7 @@ export function apply(ctx: ClientContext): void {
 
   const connection = ctx.get('connection') as ConnectionHandle | undefined
   if (connection === undefined) throw new Error('Qingmu cockpit requires an active Client Connection')
-  const location: Location | undefined = globalThis.location
+  const location: Location | undefined = (globalThis as { readonly location?: Location }).location
   const entryScope = location === undefined ? undefined : parseQingmuEntryScope(location.href)
   const hostSync = location === undefined ? undefined : createQingmuHostSync({
     entryScope,

@@ -3,7 +3,8 @@ import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ScenePlanningWorkspace } from '../src/client/ScenePlanningWorkspace.tsx'
-import type { DirectorProposalFreshnessResult, DirectorReplayProposal, ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
+import type { DirectorProposalFreshnessResult, DirectorReplayProposal, ScenePlanningRequest,
+  ScenePlanningState, ScenePlanningResult } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import type { DirectorContextBindingState, DirectorContextClientPort, DirectorObjectScope } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import type { QingmuHostSync, QingmuScenePlanningSavedMessage } from '../src/client/host-sync.ts'
 import { directorConnectionFixture } from './director-connection-fixture.client.ts'
@@ -103,7 +104,7 @@ it('restores the visible automatic shot into the director selection on reload wi
   render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={vi.fn(async () => {})}
     canonicalDirectorScope={{ projectId: 'project_1', episodeId: 'episode_1', sceneId: 'scene_1', shotId: 'automatic_1' }}
     onSelectShotId={onSelectShotId} onUnsavedChange={vi.fn()} />)
-  expect((await screen.findByLabelText('自动分镜镜头') as HTMLSelectElement).value).toBe('automatic_6')
+  expect((await screen.findByLabelText<HTMLSelectElement>('自动分镜镜头')).value).toBe('automatic_6')
   expect(onSelectShotId).toHaveBeenCalledExactlyOnceWith('automatic_6')
   expect(port.saveScenePlanning).not.toHaveBeenCalled(); expect(port.recoverScenePlanning).not.toHaveBeenCalled()
 })
@@ -125,7 +126,9 @@ it('saves one automatic shot first-frame requirement, rereads it, and never trea
   const port = {
     readScenePlanning: vi.fn().mockResolvedValueOnce(automatic).mockResolvedValueOnce(current),
     requestDirectorProposal: unavailableDirectorProposal(),
-    checkDirectorProposalFreshness: unusedFreshness(), saveScenePlanning: vi.fn(async () => result), recoverScenePlanning: vi.fn() }
+    checkDirectorProposalFreshness: unusedFreshness(),
+    saveScenePlanning: vi.fn(async (_intent: ScenePlanningRequest, _signal?: AbortSignal) => result),
+    recoverScenePlanning: vi.fn() }
   const onCommitted = vi.fn(async () => {}), onSelectShotId = vi.fn(), onUnsavedChange = vi.fn()
   render(<ScenePlanningWorkspace {...automatic} port={port} onCommitted={onCommitted}
     onSelectShotId={onSelectShotId} onUnsavedChange={onUnsavedChange} />)
@@ -139,9 +142,11 @@ it('saves one automatic shot first-frame requirement, rereads it, and never trea
   expect(onSelectShotId).toHaveBeenCalledExactlyOnceWith('automatic_2')
   fireEvent.click(screen.getByRole('button', { name: '保存首帧画面要求' }))
   await waitFor(() => { expect(port.saveScenePlanning).toHaveBeenCalledOnce(); expect(port.readScenePlanning).toHaveBeenCalledTimes(2) })
-  expect(port.saveScenePlanning).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
+  const saveCall = port.saveScenePlanning.mock.calls[0]
+  expect(saveCall?.[0].request).toMatchObject({
     action: 'edit_automatic', shotId: 'automatic_2', imagePromptCn: '街道近景的低机位首帧',
-  }) }), expect.anything())
+  })
+  expect(saveCall?.[1]).toBeInstanceOf(AbortSignal)
   expect(onCommitted).toHaveBeenCalledOnce()
   await waitFor(() => { expect(onUnsavedChange).toHaveBeenLastCalledWith(false) })
   expect(selector.value).toBe('automatic_2')
@@ -177,7 +182,7 @@ it('rejects a same-revision automatic receipt with a different source hash and k
     ...automaticReadState().canonicalStoryboard!, shots: [{ id: 'automatic_1', frameNo: 1, title: '雨夜入口', imagePromptCn: '原首帧要求' }],
   } }
   const current = { ...automatic, storyboard: { ...automatic.storyboard, version: 11, sourceHash: 'e'.repeat(64) },
-    canonicalStoryboard: { ...automatic.canonicalStoryboard!, revision: 11, sourceHash: 'e'.repeat(64) } }
+    canonicalStoryboard: { ...automatic.canonicalStoryboard, revision: 11, sourceHash: 'e'.repeat(64) } }
   const receipt: ScenePlanningResult = { schema: 'jason.qingmu-scene-planning-result.v1', action: 'edit_automatic',
     projectId: 'project_1', episodeId: 'episode_1', idempotencyKey: 'mismatch-receipt-1', requestSha256: 'c'.repeat(64),
     commandReceiptId: 'receipt_mismatch_1', eventId: 'event_mismatch_1', shotId: 'automatic_1',
@@ -235,13 +240,13 @@ it('uses the existing native composer inside shooting without consuming another 
     onCommitted:vi.fn(async () => {}), onSelectShotId, onUnsavedChange:vi.fn() }
   const view = render(<ScenePlanningWorkspace {...props} />)
   fireEvent.change(screen.getByLabelText('导演要求'), { target:{ value:'把对白改得更自然' } })
-  await waitFor(() => expect(screen.getByRole('button',{ name:'发送给当前导演' })).toHaveProperty('disabled',false))
+  await waitFor(() => { expect(screen.getByRole('button',{ name:'发送给当前导演' })).toHaveProperty('disabled',false) })
   expect(onSelectShotId).not.toHaveBeenCalled()
   expect(localStorage.getItem(key)).toBe(retained)
   expect(screen.queryByLabelText('自动分镜镜头')).toBeNull()
   expect(native.prompt).not.toHaveBeenCalled(); expect(native.activate).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button',{ name:'发送给当前导演' }))
-  await waitFor(() => expect(native.prompt).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ scope }), '把对白改得更自然', expect.any(AbortSignal)))
+  await waitFor(() => { expect(native.prompt).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ scope }), '把对白改得更自然', expect.any(AbortSignal)) })
   expect(port.saveScenePlanning).not.toHaveBeenCalled(); expect(port.recoverScenePlanning).not.toHaveBeenCalled()
   view.rerender(<ScenePlanningWorkspace {...props} canonicalDirectorScope={{ ...scope,shotId:'not_in_storyboard' }} />)
   expect(screen.getByRole('button',{ name:'发送给当前导演' })).toHaveProperty('disabled',true)

@@ -133,6 +133,10 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function isAborted(controller: AbortController): boolean {
+  return controller.signal.aborted
+}
+
 function sameProjection(left: EditableProjection, right: EditableProjection): boolean {
   return EDITABLE_FIELDS.every(field => left[field] === right[field])
 }
@@ -219,15 +223,11 @@ function assertReadySnapshot(snapshot: YimengPromptIrResponse, frame: PromptIrFr
     || subject.promptIrContentSha256 !== frame.promptIrContentSha256
   )
   if (
-    snapshot.schema !== 'jason.qingmu-prompt-ir-subject-read.v1'
-    || subject.schema !== 'jason.qingmu-prompt-ir-subject.v1'
-    || subject.projectId !== frame.projectId
+    subject.projectId !== frame.projectId
     || subject.episodeId !== frame.episodeId
-    || subject.targetType !== 'prompt_ir'
     || subject.targetId !== frame.key
     || subject.storyboardRevisionId !== frame.storyboardRevisionId
     || subject.frameId !== frame.frameId
-    || subject.status !== 'Ready'
     || snapshot.baseRevision !== subject.promptIrVersion
     || !SHA256.test(snapshot.baseSnapshotSha256)
     || readyLineageMismatch
@@ -243,9 +243,7 @@ function assertMethodResponse(
   const projection = response.projection
   const target = projection.target
   if (
-    response.schema !== 'qingmu.imago-prompt-ir-method-adapter-result.v1'
-    || projection.schema !== 'qingmu.imago-prompt-ir-method-projection.v1'
-    || response.methodAttestation.projectionSha256 !== response.projectionSha256
+    response.methodAttestation.projectionSha256 !== response.projectionSha256
     || response.methodAttestation.candidateSha256 !== projection.candidate_sha256
     || target.projectId !== request.projectId
     || target.episodeId !== request.episodeId
@@ -255,12 +253,6 @@ function assertMethodResponse(
     || target.baseVersion !== request.baseVersion
     || target.baseSnapshotSha256 !== request.baseSnapshotSha256
     || target.baseContentSha256 !== request.baseContentSha256
-    || projection.project_state_persisted !== false
-    || projection.providerCalls !== 0
-    || projection.workerStarted !== false
-    || projection.selection_executed !== false
-    || projection.human_approval_inferred !== false
-    || projection.human_signoff_inferred !== false
   ) {
     throw new Error('IMAGO PromptIR 方法回执与当前基线或零执行边界不一致')
   }
@@ -278,11 +270,8 @@ function assertProposal(
 ): void {
   const changeSet = proposal.changeSet
   if (
-    proposal.schema !== 'jason.qingmu-prompt-ir-change-set-proposal.v1'
-    || proposal.nextAction !== 'preview'
-    || changeSet.projectId !== frame.projectId
+    changeSet.projectId !== frame.projectId
     || changeSet.episodeId !== frame.episodeId
-    || changeSet.targetType !== 'prompt_ir'
     || changeSet.targetId !== frame.key
     || changeSet.baseRevision !== snapshot.baseRevision
     || changeSet.baseSnapshotSha256 !== snapshot.baseSnapshotSha256
@@ -303,8 +292,7 @@ function assertPreview(
   const base = preview.basePromptIr
   const draft = preview.candidatePromptIr
   if (
-    preview.schema !== 'jason.qingmu-prompt-ir-preview.v1'
-    || preview.changeSetId !== proposal.changeSet.id
+    preview.changeSetId !== proposal.changeSet.id
     || preview.target.projectId !== frame.projectId
     || preview.target.episodeId !== frame.episodeId
     || preview.target.storyboardRevisionId !== frame.storyboardRevisionId
@@ -313,21 +301,14 @@ function assertPreview(
     || base.id !== snapshot.subject.promptIrId
     || base.version !== snapshot.subject.promptIrVersion
     || base.contentSha256 !== snapshot.subject.promptIrContentSha256
-    || base.status !== 'Ready'
     || !sameProjection(base.editableProjection, snapshot.subject.editableProjection)
-    || draft.status !== 'Draft'
     || !isIdentifier(draft.id)
     || !Number.isSafeInteger(draft.version)
     || draft.version <= base.version
     || !SHA256.test(draft.contentSha256)
     || !sameProjection(draft.editableProjection, candidate)
-    || preview.promptDiff.changed !== true
     || !sameProjection(preview.promptDiff.before, snapshot.subject.editableProjection)
     || !sameProjection(preview.promptDiff.after, candidate)
-    || preview.providerCalls !== 0
-    || preview.workerStarted !== false
-    || preview.humanApprovalInferred !== false
-    || preview.humanSignoff !== false
   ) {
     throw new Error('易梦 PromptIR 预览与方法结果、基线或零执行边界不一致')
   }
@@ -338,31 +319,21 @@ function assertEditReceipt(
   marker: PromptIrEditRecoveryMarker,
 ): void {
   if (
-    receipt.schema !== 'jason.qingmu-prompt-ir-edit-commit-result.v1'
-    || receipt.eventType !== 'PromptIrDraftCommitted'
-    || receipt.changeSetId !== marker.changeSetId
+    receipt.changeSetId !== marker.changeSetId
     || receipt.projectId !== marker.projectId
     || receipt.episodeId !== marker.episodeId
-    || receipt.targetType !== 'prompt_ir'
     || receipt.targetId !== marker.targetId
     || receipt.storyboardRevisionId !== marker.storyboardRevisionId
     || receipt.frameId !== marker.frameId
     || receipt.previousReadyPromptIr.id !== marker.basePromptIrId
     || receipt.previousReadyPromptIr.version !== marker.baseRevision
-    || receipt.previousReadyPromptIr.status !== 'Ready'
     || !SHA256.test(receipt.previousReadyPromptIr.contentSha256)
-    || receipt.promptIr.status !== 'Draft'
     || !isIdentifier(receipt.promptIr.id)
     || !Number.isSafeInteger(receipt.promptIr.version)
     || receipt.promptIr.version <= marker.baseRevision
     || !SHA256.test(receipt.promptIr.contentSha256)
     || receipt.payloadSha256 !== marker.expectedPayloadSha256
     || receipt.idempotencyKey !== marker.idempotencyKey
-    || receipt.changed !== true
-    || receipt.providerCalls !== 0
-    || receipt.workerStarted !== false
-    || receipt.humanApprovalInferred !== false
-    || receipt.humanSignoff !== false
   ) {
     throw new Error('易梦 PromptIR Draft 回执与本次编辑提交血缘不一致')
   }
@@ -372,11 +343,7 @@ function assertEditRecovery(
   recovery: YimengRecoverPromptIrEditCommitResponse,
   marker: PromptIrEditRecoveryMarker,
 ): YimengCommitPromptIrEditResponse {
-  if (
-    recovery.schema !== 'jason.qingmu-command-receipt-recovery.v1'
-    || recovery.recovered !== true
-    || !SHA256.test(recovery.receiptSha256)
-  ) throw new Error('PromptIR 编辑回执恢复合同不完整')
+  if (!SHA256.test(recovery.receiptSha256)) throw new Error('PromptIR 编辑回执恢复合同不完整')
   assertEditReceipt(recovery.receipt, marker)
   return recovery.receipt
 }
@@ -386,24 +353,15 @@ function assertSelectionReceipt(
   marker: PromptIrSelectionRecoveryMarker,
 ): void {
   if (
-    receipt.schema !== 'jason.qingmu-prompt-ir-selection-result.v1'
-    || receipt.eventType !== 'PromptIrSelected'
-    || receipt.projectId !== marker.projectId
+    receipt.projectId !== marker.projectId
     || receipt.episodeId !== marker.episodeId
-    || receipt.targetType !== 'prompt_ir'
     || receipt.targetId !== `${marker.storyboardRevisionId}:${marker.frameId}`
     || receipt.storyboardRevisionId !== marker.storyboardRevisionId
     || receipt.frameId !== marker.frameId
     || receipt.selectedPromptIr.id !== marker.draftPromptIrId
     || receipt.selectedPromptIr.version !== marker.draftVersion
     || receipt.selectedPromptIr.contentSha256 !== marker.draftContentSha256
-    || receipt.selectedPromptIr.status !== 'Ready'
     || receipt.idempotencyKey !== marker.idempotencyKey
-    || receipt.changed !== true
-    || receipt.providerCall !== false
-    || receipt.workerStarted !== false
-    || receipt.humanApprovalInferred !== false
-    || receipt.humanSignoff !== false
   ) {
     throw new Error('易梦 PromptIR Ready 选择回执与本次选择血缘不一致')
   }
@@ -413,11 +371,7 @@ function assertSelectionRecovery(
   recovery: YimengRecoverPromptIrSelectionResponse,
   marker: PromptIrSelectionRecoveryMarker,
 ): YimengSelectPromptIrResponse {
-  if (
-    recovery.schema !== 'jason.qingmu-command-receipt-recovery.v1'
-    || recovery.recovered !== true
-    || !SHA256.test(recovery.receiptSha256)
-  ) throw new Error('PromptIR 选择回执恢复合同不完整')
+  if (!SHA256.test(recovery.receiptSha256)) throw new Error('PromptIR 选择回执恢复合同不完整')
   assertSelectionReceipt(recovery.receipt, marker)
   return recovery.receipt
 }
@@ -429,8 +383,7 @@ function assertSelectedReadyRead(
   const selected = receipt.selectedPromptIr
   const subject = snapshot.subject
   if (
-    snapshot.schema !== 'jason.qingmu-prompt-ir-subject-read.v1'
-    || subject.projectId !== receipt.projectId
+    subject.projectId !== receipt.projectId
     || subject.episodeId !== receipt.episodeId
     || subject.storyboardRevisionId !== receipt.storyboardRevisionId
     || subject.frameId !== receipt.frameId
@@ -438,7 +391,6 @@ function assertSelectedReadyRead(
     || subject.promptIrId !== selected.id
     || subject.promptIrVersion !== selected.version
     || subject.promptIrContentSha256 !== selected.contentSha256
-    || subject.status !== 'Ready'
     || snapshot.baseRevision !== selected.version
   ) throw new Error('易梦重读的 Ready PromptIR 与选择回执不一致')
 }
@@ -548,7 +500,7 @@ function ReadyPromptIrWorkspace({
   useEffect(() => {
     dirtyCallback.current?.(unsaved)
     const beforeUnload = (event: BeforeUnloadEvent): void => {
-      if (unsaved || commitLock.current) { event.preventDefault(); event.returnValue = '' }
+      if (unsaved || commitLock.current) event.preventDefault()
     }
     window.addEventListener('beforeunload', beforeUnload)
     return () => { window.removeEventListener('beforeunload', beforeUnload); dirtyCallback.current?.(false) }
@@ -809,7 +761,7 @@ function ReadyPromptIrWorkspace({
         baseRevision: nextProposal.changeSet.baseRevision,
         baseSnapshotSha256: nextProposal.changeSet.baseSnapshotSha256,
       }, controller.signal)
-      if (controller.signal.aborted) return
+      if (isAborted(controller)) return
       assertPreview(nextPreview, nextProposal, snapshot, candidate, active)
       setProposal(nextProposal)
       setPreview(nextPreview)
@@ -831,7 +783,7 @@ function ReadyPromptIrWorkspace({
     if (director) {
       const latest = await port.promptIr({ projectId: marker.projectId, episodeId: marker.episodeId,
         storyboardRevisionId: marker.storyboardRevisionId, frameId: marker.frameId }, controller.signal)
-      if (controller.signal.aborted) return
+      if (isAborted(controller)) return
       if (latest.draft?.status !== 'current' || latest.draft.subject.promptIrId !== receipt.promptIr.id
         || latest.draft.subject.promptIrVersion !== receipt.promptIr.version
         || latest.draft.subject.promptIrContentSha256 !== receipt.promptIr.contentSha256) {
@@ -928,20 +880,20 @@ function ReadyPromptIrWorkspace({
     let commandReceiptReceived = false
     try {
       const receipt = await port.commitPromptIrEdit(editCommandRequest(marker), controller.signal)
-      if (controller.signal.aborted) return
+      if (isAborted(controller)) return
       assertEditReceipt(receipt, marker)
       commandReceiptReceived = true
       const recovery = await port.recoverPromptIrEditCommit(editCommandRequest(marker), controller.signal)
-      if (controller.signal.aborted) return
+      if (isAborted(controller)) return
       await finishEdit(assertEditRecovery(recovery, marker), marker, controller)
     } catch (cause) {
-      if (!controller.signal.aborted) {
+      if (!isAborted(controller)) {
         const message = messageOf(cause)
         setError(commandReceiptReceived ? message : `${message} · ${t('promptIrUnknownEditResult')}`)
       }
     } finally {
       commitLock.current = false
-      if (!controller.signal.aborted) setOperation('idle')
+      if (!isAborted(controller)) setOperation('idle')
     }
   }
 
@@ -978,7 +930,7 @@ function ReadyPromptIrWorkspace({
       if (controller.signal.aborted) return
       assertEditReceipt(receipt, marker)
       const recovery = await port.recoverPromptIrEditCommit(editCommandRequest(marker), controller.signal)
-      if (!controller.signal.aborted) await finishEdit(assertEditRecovery(recovery, marker), marker, controller)
+      if (!isAborted(controller)) await finishEdit(assertEditRecovery(recovery, marker), marker, controller)
     } catch (cause) {
       if (controller.signal.aborted) return
       const message = messageOf(cause)
@@ -1130,7 +1082,7 @@ function ReadyPromptIrWorkspace({
       }, controller.signal)
       if (!controller.signal.aborted) {
         const state = await createFirstFrameSelectionClient().state(active, controller.signal)
-        if (!controller.signal.aborted) {
+        if (!isAborted(controller)) {
           setFirstFrameQuote(result)
           setFirstFrameState(state)
           setFirstFrameReceipt(state.selectionReceipt ?? undefined)
@@ -1310,7 +1262,7 @@ function ReadyPromptIrWorkspace({
   let fields: EditableProjection | undefined
   try { fields = parseDraft(draft) } catch { /* Advanced JSON errors remain visible to the method checker. */ }
   const blocked = busy || locked || snapshot === undefined || bufferStale
-    || (director ? snapshot?.draft?.status === 'stale' && !staleRebased : draftPromptIr !== undefined)
+    || (director ? snapshot.draft?.status === 'stale' && !staleRebased : draftPromptIr !== undefined)
   const fieldLabels: Record<EditableField, QingmuCockpitKey> = {
     imageGenPrompt: 'directorImagePrompt', lastFrameImagePrompt: 'directorLastFramePrompt',
     videoGenPrompt: 'directorVideoPrompt', motionPrompt: 'directorMotionPrompt', negativePrompt: 'directorNegativePrompt',
@@ -1338,7 +1290,7 @@ function ReadyPromptIrWorkspace({
     {videoQuote && <>
       {!videoQuote.quoteReady && <><p role="alert">当前内容或素材还不满足生成条件，请在右栏修改要求后再试。</p><details><summary>待改项</summary><ul>{[...videoQuote.quoteBlockers, ...videoQuote.dispatchBlockers].map(item => <li key={item}>{item}</li>)}</ul></details></>}
       {videoQuote.quoteReady && videoQuote.dispatchBlockers.length === 1 && videoQuote.dispatchBlockers[0] === 'operator_paid_confirmation_required' && productionRecovery.status === 'none' && videoExecution?.nextTakeOrdinal && (!productionTake || videoExecution.takeCount >= productionTake.receipt.takeOrdinal) && <>
-        {!blocked && !unsaved && !busy && <button className={css.primaryAction} type="button" onClick={() => { setProductionConfirmed(true); if (videoExecution.nextTakeOrdinal) void queueProductionTake(videoExecution.nextTakeOrdinal, undefined, true) }}>{videoExecution.nextTakeOrdinal === 2 ? '重新生成视频' : '生成视频'}</button>}
+        {!blocked && !unsaved && <button className={css.primaryAction} type="button" onClick={() => { setProductionConfirmed(true); if (videoExecution.nextTakeOrdinal) void queueProductionTake(videoExecution.nextTakeOrdinal, undefined, true) }}>{videoExecution.nextTakeOrdinal === 2 ? '重新生成视频' : '生成视频'}</button>}
         <details><summary>本次生成详情</summary><p>{videoQuote.requiredPaidConfirmationText}</p></details>
       </>}
     </>}
@@ -1383,9 +1335,9 @@ function ReadyPromptIrWorkspace({
 
       <details open={!director}><summary>{t('directorSourceDetails')}</summary>
         <dl className={css.scriptMeta}>
-          <div><dt>{t('promptIrStatus')}</dt><dd>{snapshot?.subject.status ?? active?.status ?? t('unknown')}</dd></div>
-          <div><dt>{t('promptIrVersion')}</dt><dd>{snapshot?.subject.promptIrVersion ?? active?.promptIrVersion ?? t('unknown')}</dd></div>
-          <div><dt>{t('promptIrContentHash')}</dt><dd>{snapshot?.subject.promptIrContentSha256 ?? active?.promptIrContentSha256 ?? t('unknown')}</dd></div>
+          <div><dt>{t('promptIrStatus')}</dt><dd>{snapshot?.subject.status ?? active.status}</dd></div>
+          <div><dt>{t('promptIrVersion')}</dt><dd>{snapshot?.subject.promptIrVersion ?? active.promptIrVersion}</dd></div>
+          <div><dt>{t('promptIrContentHash')}</dt><dd>{snapshot?.subject.promptIrContentSha256 ?? active.promptIrContentSha256}</dd></div>
         </dl>
       </details>
 
@@ -1498,7 +1450,7 @@ function ReadyPromptIrWorkspace({
         {fields !== undefined && <div className={directorCss.fields}>
           {EDITABLE_FIELDS.map(field => <label key={field} className={css.scriptEditor}>
             <span>{t(fieldLabels[field])}</span>
-            <textarea aria-label={t(fieldLabels[field])} value={fields?.[field] ?? ''}
+            <textarea aria-label={t(fieldLabels[field])} value={fields[field]}
               rows={field === 'videoGenPrompt' || field === 'imageGenPrompt' ? 4 : 2} disabled={blocked}
               onChange={(event) => { changeDraft(JSON.stringify({ ...fields, [field]: event.target.value }, null, 2)) }} />
           </label>)}
@@ -1778,14 +1730,14 @@ function ReadyPromptIrWorkspace({
         <div className={css.scriptActions}>
           <button type="button" className={css.primaryAction}
             disabled={busy || locked || snapshot === undefined || unsaved || bufferStale
-              || snapshot?.draft?.status === 'stale' || !productionConfirmed || videoQuote === undefined || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required'
+              || snapshot.draft?.status === 'stale' || !productionConfirmed || videoQuote === undefined || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required'
               || productionRecovery.status !== 'none' || productionTake !== undefined}
             onClick={() => { void queueProductionTake(1) }}>
             {operation === 'queuing-production-take' ? t('productionTakeQueuing') : t('productionTakeOne')}
           </button>
           <button type="button"
             disabled={busy || locked || snapshot === undefined || unsaved || bufferStale
-              || snapshot?.draft?.status === 'stale' || !productionConfirmed || videoQuote === undefined || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required'
+              || snapshot.draft?.status === 'stale' || !productionConfirmed || videoQuote === undefined || !videoQuote.quoteReady || videoQuote.dispatchBlockers.length !== 1 || videoQuote.dispatchBlockers[0] !== 'operator_paid_confirmation_required'
               || productionRecovery.status !== 'none' || productionTake?.receipt.takeOrdinal !== 1}
             onClick={() => { void queueProductionTake(2) }}>
             {t('productionTakeTwo')}

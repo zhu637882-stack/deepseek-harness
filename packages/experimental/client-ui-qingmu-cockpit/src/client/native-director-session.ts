@@ -1,6 +1,6 @@
 /** Qingmu entry reuses native session creation and preset selection; no model turn is sent. */
 import { useSyncExternalStore } from 'react'
-import type { ClientContext, ISessions, IWorkspaces } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, ISessions } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConnectionHandle, HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
 import type { NativeDirectorPromptTarget } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import { unwrapRpc } from './contracts.ts'
@@ -8,7 +8,8 @@ import { unwrapRpc } from './contracts.ts'
 /** Connection generations invalidate readiness and binding without remounting the editor. */
 export function useDirectorConnection(source?: HostDescriptionSource) {
   return useSyncExternalStore<ReturnType<HostDescriptionSource['getSnapshot']> | true>(
-    source?.subscribe ?? (() => () => {}), source?.getSnapshot ?? (() => true as const))
+    source ? (listener: () => void) => source.subscribe(listener) : () => () => {},
+    source ? () => source.getSnapshot() : () => true as const)
 }
 
 /** Native session entry leaves business data and the current conversation's content unchanged. */
@@ -38,7 +39,7 @@ export function createNativeDirectorSessionPort(ctx: ClientContext, connection: 
   }, async activate(expectedSessionId, signal) {
     // Host and browser share Cordis service names; this port is only installed by the browser runtime.
     const sessions = ctx.get('sessions') as unknown as ISessions | undefined
-    const workspaces = ctx.get('workspaces') as IWorkspaces | undefined
+    const workspaces = ctx.get('workspaces')
     if (!sessions || !workspaces) throw new Error('原生会话服务尚未就绪。')
     const generation = connection.hostDescription.getSnapshot()
     const current = () => {

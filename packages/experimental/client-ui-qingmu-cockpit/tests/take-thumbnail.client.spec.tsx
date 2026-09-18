@@ -38,7 +38,7 @@ describe('verified video thumbnails', () => {
     const load = vi.fn(async () => response)
     render(<><TakeThumbnail request={request} load={load as never} className="thumb" alt="镜头缩略图" />
       <TakeThumbnail request={request} load={load as never} className="thumb" alt="候选第一帧" /></>)
-    await waitFor(() => expect(screen.getAllByRole('img')).toHaveLength(2))
+    await waitFor(() => { expect(screen.getAllByRole('img')).toHaveLength(2) })
     expect(load).toHaveBeenCalledTimes(1)
     expect(draw).toHaveBeenCalledTimes(1)
     expect(create).toHaveBeenCalledTimes(1)
