@@ -1,4 +1,4 @@
-/** Shared plumbing for the same-origin, cookie-only routes that carry one human decision. */
+/** Shared plumbing for the same-origin browser routes that carry one human decision. */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
@@ -32,43 +32,41 @@ function sessionCookie(req: IncomingMessage): string | undefined {
   return cookie
 }
 
-/** Whether the request is a same-origin browser post that presents no service token. */
-function sameOriginBrowser(req: IncomingMessage): boolean {
+/**
+ * Decide whether one request is a same-origin browser write presenting no service token.
+ *
+ * A route that writes Host state directly requires an `Origin` equal to the
+ * request's own `Host` and no `Authorization` header, so a page on another origin
+ * or a caller presenting a service token cannot drive it. It requires no session
+ * cookie: the capsule promotion this guards writes two runtime-root files that any
+ * process running as this user can already write, and a cookie the route never
+ * verifies would only add a sign-in the operator's browser cannot satisfy. The
+ * cookie-forwarding Writer routes add that check themselves in
+ * {@link browserWriteHeaders}, where the Writer does verify the cookie.
+ *
+ * @param req - Request whose `host`, `origin` and `authorization` are checked.
+ * @returns True for a same-origin browser post presenting no service token.
+ */
+export function isSameOriginBrowserWrite(req: IncomingMessage): boolean {
   const host = req.headers.host
   return typeof host === 'string' && req.headers.authorization === undefined
     && req.headers.origin === `http://${host}`
 }
 
 /**
- * Decide whether one request is a signed-in human's own browser decision.
- *
- * The Writer's human-authority routes require a natural person's `jason_token`
- * cookie, an `Origin` equal to the request's own `Host`, and no `Authorization`
- * header, so a service token presented here would turn an operator decision into
- * an unattributable one. Requiring the same three facts on a route that writes
- * Host state instead of relaying keeps that state out of reach of any local
- * caller that is not the operator's browser session.
- *
- * @param req - Request whose `host`, `origin`, `authorization` and `cookie` are checked.
- * @returns True for a same-origin browser post carrying one well-formed session cookie.
- */
-export function isHumanBrowserWrite(req: IncomingMessage): boolean {
-  return sameOriginBrowser(req) && sessionCookie(req) !== undefined
-}
-
-/**
  * Forward only the browser's own session cookie, rewritten to the upstream origin.
  *
- * Refusing anything but a request {@link isHumanBrowserWrite} accepts keeps the
- * decision attributable to the signed-in person even when the caller is a script
- * inside the same origin.
+ * Refusing anything but a same-origin browser request keeps the decision
+ * attributable to the signed-in person even when the caller is a script inside the
+ * same origin, and the forwarded `jason_token` cookie is the one the Writer
+ * verifies against its own session store.
  *
  * @param req - Browser request whose `host`, `origin`, `authorization` and `cookie` are checked.
  * @param upstream - Resolved Writer URL that supplies the forwarded origin and host.
  * @returns Headers for the upstream call, or undefined when the request is not a same-origin browser post.
  */
 export function browserWriteHeaders(req: IncomingMessage, upstream: URL): Headers | undefined {
-  if (!sameOriginBrowser(req)) return undefined
+  if (!isSameOriginBrowserWrite(req)) return undefined
   const cookie = sessionCookie(req)
   if (cookie === undefined) return undefined
   return new Headers({

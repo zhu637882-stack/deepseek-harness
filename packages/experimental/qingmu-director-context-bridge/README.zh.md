@@ -162,7 +162,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 - 使用相同 Writer/Core 路径，设置 `QINGMU_FULL_HOST_BROWSER=1` 并通过 Vitest 运行 `tests/native-first-draft-host.spec.ts`，验证随包完整 Host 和构建客户端。它使用真实服务和脚本化模型输出，覆盖原生传输、采用/编辑/保存/Ready/刷新及旧对象拒绝。runtime 和驾驶舱工件在一次性目录构建，与实际服务字节核对，共享安装包不改动。合成 Ready 选择不是人工内容签收、生产启用、真实模型创作质量或生成。
 - 旧回放建议仍由 `checkDirectorProposalFreshness` 检查漂移；原生提示词建议使用其已记录的读取回执和只读接口。
 - 原生工具不启用真实 DeepSeek 路由、费用或生产 canary；可选的专属素材连接只允许显式 DashScope 临时上传。
-- 胶囊晋升路由要求请求形如操作者本人的浏览器会话——无 `authorization` 头、`origin` 与 Host 一致、带格式正确的 `jason_token` cookie——但从不向 Writer 的会话存储校验该 cookie，只有登录代理能做这件事。同机进程若同时伪造这两项即可通过；而它本来就能直接写这两个胶囊文件。该栅栏拦住的是其他源站页面和普通工具调用，拦不住有意为之的本机调用者。
+- 胶囊晋升路由要求同源浏览器请求——无 `authorization` 头、`origin` 与自身 `host` 一致——不要求会话 cookie。它写的两个胶囊文件本来就能被以本用户身份运行的任何进程直接写，而该路由从不向 Writer 会话存储校验的 cookie 只会平添一个操作者浏览器无法满足的登录。该栅栏拦住的是其他源站页面和普通工具调用，拦不住有意为之的本机调用者。
 
 loopback `/qingmu-director-context` RPC 与驾驶舱接力面板已端到端驱动批次：`driveRelayBatch` 在一把已接管的 Host 租约下运行准入-准备-预留-派发-收片循环，start、advance、recover、complete 与 close 也一并接入。当某镜的运行仅在途时，驱动会准入并准备下一镜直到其交接，但绝不为它预留或派发，因此该镜只在当前运行落定后才进入付费队列。付费派发因此同时只保持一笔未结算提交；跨镜并行付费生成与线上生产启用仍延后。
 

@@ -15,7 +15,7 @@
  */
 import { isTrustedApiRequest } from '@deepseek-ai/dsh-client-connection/src/api-request-trust.ts'
 import {
-  isHumanBrowserWrite, jsonResponse, readJsonBody,
+  isSameOriginBrowserWrite, jsonResponse, readJsonBody,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/src/human-browser-bridge.ts'
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import {
@@ -142,19 +142,17 @@ function parsePromotion(value: Record<string, unknown>): readonly string[] | und
  * Register the capsule review read and the human promotion route.
  *
  * Both routes answer only a same-origin browser on this Host: the shared trust
- * fence refuses a rebound or cross-site caller. The promotion additionally
- * refuses a request that does not look like the operator's own browser session —
- * no `authorization` header, a matching `origin`, and a well-formed
- * `jason_token` cookie — because a promotion is what lets a lesson the director
- * wrote about itself reach the director's next turn.
+ * fence refuses a rebound or cross-site caller, and the promotion additionally
+ * refuses a request carrying an `authorization` header or an `origin` that does
+ * not match its own `host`. A promotion is what lets a lesson the director wrote
+ * about itself reach the director's next turn, so it stays one human click.
  *
- * That check is a request-shape fence, not authentication: the cookie is not
- * verified against the Writer's session store, which only the sign-in proxy can
- * do. A process on this machine that forges the origin header and a
- * syntactically valid cookie is let through. The fence keeps a browser page on
- * another origin, and an ordinary tool call, from approving capsules; it does not
- * keep out a determined local caller, and the two capsule files it writes are
- * already writable by any such caller.
+ * The promotion requires no session cookie. The two capsule files it writes are
+ * already writable by any process running as this user, and a cookie this route
+ * never verifies against the Writer's session store would only add a sign-in the
+ * operator's browser cannot satisfy. The fence keeps a browser page on another
+ * origin, and an ordinary tool call, from approving capsules; it does not keep out
+ * a determined local caller, which needs no fence to write those files.
  *
  * The promotion writes the active store before it trims the queue, so a crash
  * between the two leaves the capsule approved and still queued; re-approving it
@@ -200,7 +198,7 @@ export function registerExperienceCapsuleReviewRoutes(
 
   const disposePromote = webServer.register({
     kind: 'exact', path: PROMOTE_PATH, handler: async (req, res) => {
-      if (req.method !== 'POST' || !isTrustedApiRequest(req, []) || !isHumanBrowserWrite(req)) {
+      if (req.method !== 'POST' || !isTrustedApiRequest(req, []) || !isSameOriginBrowserWrite(req)) {
         jsonResponse(res, 403, { code: 'experience_capsule_review_forbidden' }); return
       }
       if (dependencies.runtimeRoot === '') {

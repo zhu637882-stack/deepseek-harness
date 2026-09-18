@@ -8,7 +8,6 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 const REVIEW_PATH = '/api/qingmu/experience-capsule-review'
 const PROMOTE_PATH = `${REVIEW_PATH}/promote`
-const LOGIN_PATH = '/api/qingmu/editorial-handoff/human-session'
 
 const readyState = {
   schema: 'qingmu-experience-capsule-review-v1', renderLimit: 12, injectedCount: 1,
@@ -43,7 +42,6 @@ interface Harness {
   readonly pending: Deferred[]
   readonly review: (outcome: Outcome) => void
   readonly promote: (outcome: Outcome) => void
-  readonly login: (ok: boolean) => void
 }
 
 /** The URL the panel actually requested. */
@@ -62,24 +60,18 @@ async function respond(outcome: Outcome, pending: Deferred[]): Promise<Response>
   })
 }
 
-/** Cookie-only fetch double: the panel never sends an identity field, only the browser's own cookie. */
+/** Fetch double: the panel sends no identity field, relying on same-origin credentials. */
 function harness(review: Outcome = json(readyState), promote: Outcome = json(readyState)): Harness {
   const sent: Record<string, unknown>[] = []
   const paths: string[] = []
   const pending: Deferred[] = []
   let reviewOutcome = review
   let promoteOutcome = promote
-  let loginOk = true
   vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async (input, init) => {
     const url = requestUrl(input)
     paths.push(url)
     expect(init?.credentials).toBe('same-origin')
     expect(init?.cache).toBe('no-store')
-    if (url === LOGIN_PATH) {
-      return loginOk
-        ? Response.json({ authenticated: true })
-        : Response.json({ code: 'login_refused' }, { status: 401 })
-    }
     if (url === PROMOTE_PATH) {
       expect(init?.method).toBe('POST')
       sent.push(JSON.parse(typeof init?.body === 'string' ? init.body : '') as Record<string, unknown>)
@@ -95,7 +87,6 @@ function harness(review: Outcome = json(readyState), promote: Outcome = json(rea
     sent, paths, pending,
     review: (outcome: Outcome) => { reviewOutcome = outcome },
     promote: (outcome: Outcome) => { promoteOutcome = outcome },
-    login: (ok: boolean) => { loginOk = ok },
   }
 }
 
@@ -247,52 +238,19 @@ describe('experience capsule review panel', () => {
     expect(promoteButton().hasAttribute('disabled')).toBe(false)
   })
 
-  it('asks for the operator’s own session on a forbidden promotion and then promotes', async () => {
-    const gate = harness(json(readyState), json({}, 403))
+  it('reports a forbidden promotion without offering a login', async () => {
+    const gate = harness(json(readyState), json({ code: 'experience_capsule_review_forbidden' }, 403))
     panel()
     await loaded()
     tick('SELF-01')
     fireEvent.click(promoteButton())
     expect(await alertText()).toContain('experience_capsule_review_forbidden')
-    await screen.findByLabelText('本人账号')
-    // The route answers 403 again until the browser holds the person's cookie.
-    gate.login(false)
-    fireEvent.change(screen.getByLabelText('本人账号'), { target: { value: 'owner' } })
-    fireEvent.change(screen.getByLabelText('本人密码'), { target: { value: 'secret' } })
-    fireEvent.click(screen.getByRole('button', { name: '验证本人会话' }))
-    expect(await alertText()).toContain('experience_capsule_review_login_failed')
-    gate.login(true)
-    gate.review(json({ ...readyState, injectedCount: 2 }))
-    fireEvent.click(screen.getByRole('button', { name: '验证本人会话' }))
-    // A signed-in session only re-reads the queue: the promotion is still the operator's click.
-    await screen.findByText(/本次注入: 2\/12/)
-    gate.promote(json({ ...readyState, promoted: ['SELF-01'] }))
-    tick('SELF-01')
-    fireEvent.click(promoteButton())
-    await screen.findByText(/已晋升: SELF-01/)
+    // The fence is request-shape only, so a 403 is reported, never signed into: no
+    // credential form appears, the refusal re-reads the queue and spends the tick.
+    expect(screen.queryByLabelText('本人账号')).toBeNull()
     expect(screen.queryByLabelText('本人密码')).toBeNull()
-    expect(gate.sent.filter(body => body.confirmed === true)).toHaveLength(2)
-    // The panel never learns the credential: the sign-in body is the only place it appears.
-    expect(gate.sent.every(body => !JSON.stringify(body).includes('secret'))).toBe(true)
-  })
-
-  it('reports a sign-in request that never answered', async () => {
-    const gate = harness(json(readyState), json({}, 403))
-    panel()
-    await loaded()
-    tick('SELF-01')
-    fireEvent.click(promoteButton())
-    await screen.findByLabelText('本人账号')
-    vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>(async (input) => {
-      const url = requestUrl(input)
-      if (url === LOGIN_PATH) throw 'sign-in unreachable'
-      throw new Error(`unexpected request ${url}`)
-    }))
-    fireEvent.change(screen.getByLabelText('本人账号'), { target: { value: 'owner' } })
-    fireEvent.change(screen.getByLabelText('本人密码'), { target: { value: 'secret' } })
-    fireEvent.click(screen.getByRole('button', { name: '验证本人会话' }))
-    expect(await alertText()).toContain('sign-in unreachable')
-    expect(gate.sent).toHaveLength(1)
+    expect(gate.paths).toEqual([REVIEW_PATH, PROMOTE_PATH, REVIEW_PATH])
+    expect(promoteButton().hasAttribute('disabled')).toBe(true)
   })
 
   it('re-reads on demand and clears the error a stale reply caused', async () => {
@@ -315,20 +273,14 @@ describe('experience capsule review panel', () => {
   })
 
   it('drops a stale read instead of overwriting the newer one', async () => {
-    const gate = harness(json(readyState), json({}, 403))
+    const gate = harness({ kind: 'defer' })
     panel()
-    await loaded()
-    tick('SELF-01')
-    fireEvent.click(promoteButton())
-    await screen.findByLabelText('本人账号')
-    gate.review({ kind: 'defer' })
-    fireEvent.change(screen.getByLabelText('本人账号'), { target: { value: 'owner' } })
-    fireEvent.change(screen.getByLabelText('本人密码'), { target: { value: 'secret' } })
-    fireEvent.click(screen.getByRole('button', { name: '验证本人会话' }))
+    // The mount read is still in flight when a refresh supersedes it.
     await waitFor(() => { expect(gate.pending).toHaveLength(1) })
     gate.review(json(readyState))
     fireEvent.click(refreshButton())
-    await waitFor(() => { expect(gate.paths.filter(path => path === REVIEW_PATH)).toHaveLength(3) })
+    await waitFor(() => { expect(gate.paths.filter(path => path === REVIEW_PATH)).toHaveLength(2) })
+    await loaded()
     gate.pending[0]!.resolve(new Response(JSON.stringify({
       ...readyState, queue: [{ id: 'STALE-01', symptom: '过期队列', rule: '不该出现', alreadyApproved: false }],
     }), { status: 200, headers: { 'content-type': 'application/json' } }))

@@ -69,10 +69,8 @@ function get(base: string, headers: Record<string, string> = {}): Promise<Respon
 function post(base: string, body: unknown, headers: Record<string, string> = {}): Promise<Response> {
   return fetch(`${base}${PROMOTE_PATH}`, {
     method: 'POST',
-    headers: {
-      origin: base, cookie: 'jason_token=human-cookie; unrelated=value',
-      'content-type': 'application/json', ...headers,
-    },
+    // No cookie: the promotion route is same-origin only and never verifies one.
+    headers: { origin: base, 'content-type': 'application/json', ...headers },
     body: typeof body === 'string' ? body : JSON.stringify(body),
   })
 }
@@ -144,23 +142,18 @@ describe('experience capsule review routes', () => {
       expect(response.status, label).toBe(403)
       expect(await response.json(), label).toEqual({ code: 'experience_capsule_review_forbidden' })
     }
-    const queried = await fetch(`${base}${PROMOTE_PATH}`, {
-      headers: { origin: base, cookie: 'jason_token=human-cookie' },
-    })
+    const queried = await fetch(`${base}${PROMOTE_PATH}`, { headers: { origin: base } })
     expect(queried.status).toBe(403)
     expect((await files(root)).queue).toEqual([queued('SELF-01')])
   })
 
-  it('refuses a promotion that is not the signed-in operator browser', async () => {
+  it('refuses a promotion that is not a same-origin browser post', async () => {
     const root = await seededRoot([queued('SELF-01')])
     const base = await host(root)
     const forbidden: [string, Record<string, string>][] = [
       ['bearer token', { authorization: 'Bearer launcher' }],
       ['no origin', { origin: '' }],
       ['foreign origin', { origin: 'http://evil.example' }],
-      ['no cookie', { cookie: '' }],
-      ['unrelated cookie', { cookie: 'other=value' }],
-      ['cookie over the bound', { cookie: `jason_token=${'x'.repeat(9000)}` }],
     ]
     for (const [label, headers] of forbidden) {
       const response = await post(base, { confirmed: true, ids: ['SELF-01'] }, headers)

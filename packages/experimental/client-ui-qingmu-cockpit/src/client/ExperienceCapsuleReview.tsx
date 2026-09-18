@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { HumanSessionSignIn, jsonObject } from './human-session.tsx'
+import { jsonObject } from './human-session.tsx'
 import type { QingmuCockpitKey } from './locales.ts'
 import css from './QingmuCockpit.module.css'
 
@@ -51,7 +51,6 @@ export function ExperienceCapsuleReview(props: Props) {
   const [absent, setAbsent] = useState(false)
   const [ticked, setTicked] = useState<readonly string[]>([])
   const [busy, setBusy] = useState(false)
-  const [needsLogin, setNeedsLogin] = useState(false)
   const [error, setError] = useState<string>()
   const loadRevision = useRef(0)
 
@@ -93,10 +92,6 @@ export function ExperienceCapsuleReview(props: Props) {
       })
       const value = await jsonObject(response)
       const code = typeof value.code === 'string' ? value.code : undefined
-      if (response.status === 403) {
-        setNeedsLogin(true)
-        throw new Error(code ?? 'experience_capsule_review_forbidden')
-      }
       if (!response.ok || value.schema !== 'qingmu-experience-capsule-review-v1') {
         // The queue moved under this decision, or the files are unusable: reload
         // so the operator promotes against what is actually queued.
@@ -105,7 +100,6 @@ export function ExperienceCapsuleReview(props: Props) {
         await load().catch(() => undefined)
         throw new Error(code ?? 'experience_capsule_review_promote_failed')
       }
-      setNeedsLogin(false)
       setState(value as unknown as ReviewState)
       setTicked([])
     } catch (cause) {
@@ -126,8 +120,6 @@ export function ExperienceCapsuleReview(props: Props) {
   return <section className={css.entityReview} aria-label={props.t('capsuleReviewTitle')}>
     <h4>{props.t('capsuleReviewTitle')}</h4>
     <p className={css.boundary}>{props.t('capsuleReviewBoundary')}</p>
-    {needsLogin && <HumanSessionSignIn t={props.t} failureCode="experience_capsule_review_login_failed"
-      onError={setError} onSignedIn={() => load()} />}
     {reviewed === undefined && error === undefined
       && <p role="status" className={css.empty}>{props.t('capsuleReviewLoading')}</p>}
     {reviewed !== undefined && <>
