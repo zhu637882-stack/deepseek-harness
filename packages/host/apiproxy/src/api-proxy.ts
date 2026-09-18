@@ -676,6 +676,101 @@ function matchesQuestions(payload: QuestionResponsePayload, pending: PendingQues
 }
 
 /**
+ * Best-effort repair of malformed JSON strings commonly produced by LLMs.
+ * Handles truncated strings, trailing commas, and incomplete property values.
+ * Returns the original string if repair fails; callers should still try JSON.parse
+ * first and only call this on failure.
+ */
+function repairMalformedJson(raw: string): string {
+  let s = raw.trimEnd()
+  let safety = 0
+  while (safety++ < 50) {
+    try {
+      JSON.parse(s)
+      return s
+    } catch {}
+
+    const lastChar = s[s.length - 1]
+
+    if (lastChar === ',') {
+      s = s.slice(0, -1).trimEnd()
+      continue
+    }
+
+    let inString = false
+    let escaped = false
+    let lastQuoteIdx = -1
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i]
+      if (escaped) { escaped = false; continue }
+      if (c === '\\' && inString) { escaped = true; continue }
+      if (c === '"') {
+        if (!inString) {
+          inString = true
+        } else {
+          inString = false
+          lastQuoteIdx = i
+        }
+      }
+    }
+
+    if (inString && lastQuoteIdx >= 0) {
+      const afterQuote = s.slice(lastQuoteIdx + 1).trim()
+      if (afterQuote.length === 0 || afterQuote === ',') {
+        s = s.slice(0, lastQuoteIdx + 1)
+        continue
+      }
+      if (afterQuote[0] === ':' || afterQuote.startsWith(': ')) {
+        s = s.slice(0, lastQuoteIdx + 1)
+        continue
+      }
+      s = s.slice(0, lastQuoteIdx + 1) + ','
+      continue
+    }
+
+    if (inString && lastQuoteIdx === -1) {
+      s = s.replace(/,\s*"[^"]*$/, '').trimEnd()
+      if (s.endsWith('{')) s += '}'
+      if (s.endsWith('[')) s += ']'
+      continue
+    }
+
+    if (lastChar === ':' || lastChar === '{' || lastChar === '[') {
+      s = s.slice(0, -1).trimEnd()
+      if (s.endsWith(',')) s = s.slice(0, -1).trimEnd()
+      continue
+    }
+
+    if (/:\s*$/.test(s)) {
+      s = s.replace(/:\s*$/, '').trimEnd()
+      if (s.endsWith(',')) s = s.slice(0, -1).trimEnd()
+      continue
+    }
+
+    break
+  }
+
+  const stack: string[] = []
+  let inStr = false
+  let esc = false
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (esc) { esc = false; continue }
+    if (c === '\\' && inStr) { esc = true; continue }
+    if (c === '"') { inStr = !inStr; continue }
+    if (!inStr) {
+      if (c === '{') stack.push('}')
+      else if (c === '[') stack.push(']')
+      else if (c === '}' || c === ']') stack.pop()
+    }
+  }
+  if (inStr) s += '"'
+  s += stack.reverse().join('')
+
+  try { JSON.parse(s); return s } catch { return raw }
+}
+
+/**
  * Compute the render intent for a tool/call or tool/result event through the
  * presenters registered at this moment; every other event type gets none. A
  * result's presenter needs its call's parsed args — `argsFor` supplies them
@@ -698,7 +793,9 @@ function viewFor(
   try {
     if (event.type === 'tool/call') {
       const { name, arguments: raw } = event.data as ToolCallData
-      const view = ctx.tools.get(name, scope)?.presentCall?.(JSON.parse(raw))
+      let args: unknown
+      try { args = JSON.parse(raw) } catch { args = JSON.parse(repairMalformedJson(raw)) }
+      const view = ctx.tools.get(name, scope)?.presentCall?.(args)
       return view === undefined ? undefined : { for: 'call', view }
     }
     if (event.type === 'tool/result') {
@@ -737,8 +834,9 @@ function backscanArgs(events: readonly SessionEvent[], callId: string): { name: 
     try {
       return { name: data.name, args: JSON.parse(data.arguments) }
     } catch {
-      // Unparseable stored arguments: same soft-fall as a live parse failure.
-      return undefined
+      try { return { name: data.name, args: JSON.parse(repairMalformedJson(data.arguments)) } } catch {
+        return undefined
+      }
     }
   }
   return undefined
@@ -3378,7 +3476,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               try {
                 let table = openCalls.get(session.id)
                 if (table === undefined) openCalls.set(session.id, table = new Map<string, { name: string; args: unknown }>())
-                table.set(data.callId, { name: data.name, args: JSON.parse(data.arguments) })
+                let args: unknown
+                try { args = JSON.parse(data.arguments) } catch { args = JSON.parse(repairMalformedJson(data.arguments)) }
+                table.set(data.callId, { name: data.name, args })
               } catch {
                 // Unparseable model arguments: leave the table unset; the result view soft-falls.
               }
