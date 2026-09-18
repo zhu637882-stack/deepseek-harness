@@ -10,6 +10,9 @@ import type { ImagoDirectorInstructionsResponse } from '@deepseek-ai/dsh-experim
 import type { YimengPromptIrResponse, YimengPromptIrBootstrapResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
 import type { RelayState } from './relay-state.ts'
 
+export type { RelayState, RelayStart, RelayItem } from './relay-state.ts'
+export type { RelayDriveReport } from './relay-runner.ts'
+
 /** Full current upstream and C5 read before authoring the first prompt; no invented Ready baseline. */
 export interface NativeFirstDraftInput {
   readonly schema: 'qingmu.native-first-draft-input.v1'
@@ -271,6 +274,14 @@ export interface DirectorContextClientPort {
     readonly state: RelayState | null
     readonly recovered: boolean
   }>
+  /** Read the current relay ledger; alias for readRelayState for cockpit compatibility. */
+  readRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<RelayState | null>
+  /** Release a dead Host lease so recovery can re-claim it. */
+  releaseRelayHostLease?(sessionId: string, batchId: string, signal?: AbortSignal): Promise<{
+    readonly settling: boolean
+  }>
+  /** Drive the relay batch forward one step; Host-only automation entry. */
+  driveRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<import('./relay-runner.ts').RelayDriveReport>
 }
 
 declare module '@deepseek-ai/dsh-session/types' {

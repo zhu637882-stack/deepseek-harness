@@ -7,7 +7,7 @@ import type {
   QueueReferenceVideoRequest, ReferenceVideoDraftResponse, ReferenceVideoQuoteResponse, ReferenceVideoRun,
   ReferenceVideoRunsResponse,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
-import { borrowHostDirectorBinding } from './bridge.ts'
+import { claimHostDirectorBinding } from './bridge.ts'
 import { readReferenceHandoff, verifyReferenceHandoff } from './reference-handoff.ts'
 import { admitRelayDirector } from './relay-controller.ts'
 import {
@@ -54,7 +54,7 @@ interface RelayLease {
  * lease the drive only borrowed, so the batch keeps its single writer until completion or close.
  */
 function openRelayLease(session: Session, batchId: string, port: DirectorContextReadPort): RelayLease {
-  const handle = borrowHostDirectorBinding(session, batchId, port)
+  const handle = claimHostDirectorBinding(session, batchId, port)
   const key = (scope: DirectorObjectScope): string =>
     [scope.projectId, scope.episodeId, scope.sceneId, scope.shotId].join('\u0000')
   let selected: string | null = null

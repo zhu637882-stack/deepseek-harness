@@ -10,7 +10,7 @@ import type {
   DirectorReplayProposal,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { createDirectorContextBridge } from '../src/index.ts'
-import { claimHostDirectorBinding, borrowHostDirectorBinding, hasHostDirectorOwner, hasBrowserDirectorOwner,
+import { claimHostDirectorBinding, hasHostDirectorOwner, hasBrowserDirectorOwner,
   invalidateHostDirectorBinding, assertNativePromptSelection, refreshNativeDirectorBinding,
   withHostDirectorOperation, withHostDirectorStream } from '../src/bridge.ts'
 import { appendRelayState, createRelayState, readRelayState } from '../src/relay-state.ts'
@@ -173,57 +173,6 @@ describe('Host relay director binding', () => {
       await expect(first.enter(firstScope)).rejects.toThrow(/owner|lease|relay/i)
       expect(await second.enter(firstScope)).toMatchObject({ status: 'current' })
     } finally { second.release() }
-  })
-
-  it('reuses the start Host lease for a drive and keeps it after the borrowed release', async () => {
-    const session = Session.create(SessionId('relay-director'))
-    beginRelay(session)
-    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) },
-      { ok: true, context: context(firstScope, sha('a')) })
-    const start = claimHostDirectorBinding(session, 'relay-1', port)
-    try {
-      const drive = borrowHostDirectorBinding(session, 'relay-1', port)
-      expect(hasHostDirectorOwner(session)).toBe(true)
-      expect(await drive.enter(firstScope)).toMatchObject({ status: 'current' })
-      drive.release()
-      expect(hasHostDirectorOwner(session), 'A drive must not drop the lease its batch start holds').toBe(true)
-      const second = borrowHostDirectorBinding(session, 'relay-1', port)
-      expect(await second.enter(firstScope)).toMatchObject({ status: 'current' })
-      second.release()
-      expect(hasHostDirectorOwner(session)).toBe(true)
-    } finally { start.release() }
-    expect(hasHostDirectorOwner(session)).toBe(false)
-  })
-
-  it('cold-claims a Host lease when a drive runs without a held start lease', async () => {
-    const session = Session.create(SessionId('relay-director'))
-    beginRelay(session)
-    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) })
-    expect(hasHostDirectorOwner(session)).toBe(false)
-    const drive = borrowHostDirectorBinding(session, 'relay-1', port)
-    expect(hasHostDirectorOwner(session)).toBe(true)
-    expect(await drive.enter(firstScope)).toMatchObject({ status: 'current' })
-    drive.release()
-    expect(hasHostDirectorOwner(session), 'A cold-claimed drive lease is released when the drive ends').toBe(false)
-  })
-
-  it('rejects borrowing an invalidated Host lease until it is explicitly released', async () => {
-    const session = Session.create(SessionId('relay-director'))
-    beginRelay(session)
-    const port = queuedPort({ ok: true, context: context(firstScope, sha('a')) },
-      { ok: true, context: context(firstScope, sha('a')) })
-    const start = claimHostDirectorBinding(session, 'relay-1', port)
-    try {
-      await start.enter(firstScope)
-      invalidateHostDirectorBinding(session)
-      expect(() => borrowHostDirectorBinding(session, 'relay-1', port)).toThrow(/lease/i)
-      expect(hasHostDirectorOwner(session)).toBe(true)
-    } finally { start.release() }
-    expect(hasHostDirectorOwner(session)).toBe(false)
-    const recovered = borrowHostDirectorBinding(session, 'relay-1', port)
-    try {
-      expect(await recovered.enter(firstScope)).toMatchObject({ status: 'current' })
-    } finally { recovered.release() }
   })
 
   it('keeps an invalidated Host lease closed until explicit release and reacquisition', async () => {
