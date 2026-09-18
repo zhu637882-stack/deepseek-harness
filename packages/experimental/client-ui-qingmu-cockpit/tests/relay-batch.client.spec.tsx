@@ -168,6 +168,15 @@ describe('RelayBatchPanel', () => {
     expect(screen.getByText(/rpc unavailable/)).toBeDefined()
   })
 
+  it('stops the loading notice once the read fails instead of showing both', async () => {
+    render(<RelayBatchPanel sessionId="session-1" directorBridge={bridge({
+      readRelayBatch: vi.fn(async () => { throw new Error('director context session unavailable') }),
+      advanceRelayBatch: vi.fn(), completeRelayBatch: vi.fn(), closeRelayBatch: vi.fn(), recoverRelayBatch: vi.fn(),
+    })} />)
+    expect(await screen.findByRole('alert')).toBeDefined()
+    expect(screen.queryByText('正在读取接力状态…')).toBeNull()
+  })
+
   it('shows the reserved cost against the authorization cap, per item and in total', async () => {
     const batch = runningBatch()
     batch.items[0]!.submission = {

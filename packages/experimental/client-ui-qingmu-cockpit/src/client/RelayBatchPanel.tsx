@@ -213,7 +213,7 @@ export function RelayBatchPanel({ sessionId, directorBridge, relations, aspectRa
     <p>创建批次只记录镜头范围与付费授权上限，不提交生成；Host 导演在授权内逐镜准备并提交，本页可查看进度、暂停等待或关闭批次。</p>
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
-    {state === undefined && <p role="status">正在读取接力状态…</p>}
+    {state === undefined && !error && <p role="status">正在读取接力状态…</p>}
     {state === null && <p>当前没有接力批次。</p>}
     {state === null && relations && startRelay && <div className={styles.create}>
       <fieldset>
