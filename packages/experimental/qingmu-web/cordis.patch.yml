@@ -27,4 +27,4 @@
     - id: qingmu-project-context
       name: '@deepseek-ai/dsh-experimental-qingmu-project-context'
     - id: creative-skill-catalog
-      name: '@deepseek-ai/dsh-experimental-creative-skill-catalog'
+      name: '@deepseek-ai/dsh-experimental-qingmu-creative-skill-catalog'
