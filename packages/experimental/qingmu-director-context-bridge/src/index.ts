@@ -2,11 +2,15 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection'
+import type { Session } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-agent'
 import { directorContextBindingProjectionDefinition } from './projection.ts'
 import { nativeDialogueProjection } from './dialogue-projection.ts'
 import { relayStateProjectionDefinition } from './relay-projection.ts'
 import { createDirectorContextRpcHandler } from './rpc.ts'
 import { readNativeDirectorReadiness } from './native-readiness.ts'
+import { readRelayState } from './relay-state.ts'
+import { driveRelayBatch, type RelayDriveReport } from './relay-runner.ts'
 import { registerExperienceCapsuleReviewRoutes } from './experience-capsule-review.ts'
 import { resolveCapsuleRuntimeRoot } from './experience-capsule-store.ts'
 import type {} from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter'
@@ -14,9 +18,13 @@ import type {} from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter'
 
 export { createDirectorContextBridge } from './bridge.ts'
 export { createDirectorContextRpcHandler } from './rpc.ts'
+export { driveRelayBatch } from './relay-runner.ts'
 export { directorContextBindingProjectionDefinition, directorContextBindingStateSchema } from './projection.ts'
 export { relayStateProjectionDefinition } from './relay-projection.ts'
-export { readRelayBatch, startRelayBatch, admitRelayDirector, advanceRelayBatch, completeRelayBatch, closeRelayBatch, recoverRelayBatch } from './relay-controller.ts'
+export {
+  readRelayBatch, startRelayBatch, admitRelayDirector, advanceRelayBatch,
+  completeRelayBatch, closeRelayBatch, recoverRelayBatch, releaseDeadRelayHostLease,
+} from './relay-controller.ts'
 export type * from './types.ts'
 
 /** Cordis plugin name. */
@@ -48,9 +56,21 @@ export function apply(ctx: Context): void {
     const handler: ConnectionRpcHandler = (endpoint, payload, signal) => {
       const prompt = host.get('qingmuYimengRead')
       const method = host.get('qingmuImagoMethod')
+      const relayDriver = async (session: Session, driveSignal: AbortSignal): Promise<RelayDriveReport> => {
+        const agent = host.get('agents')?.get(session.id)
+        if (!agent || !prompt) {
+          return { action: 'waiting', state: readRelayState(session), steps: [],
+            reason: agent ? 'read-port-unavailable' : 'agent-unavailable' }
+        }
+        return driveRelayBatch(agent, {
+          context: port, read: prompt, command: host.qingmuYimengCommand,
+          flush: target => host.sessions.flush(target),
+          now: () => new Date().toISOString(), requestId: () => crypto.randomUUID(),
+        }, [], driveSignal)
+      }
       return createDirectorContextRpcHandler(host.sessions, port,
         prompt && method ? { prompt, method } : undefined,
-        session => readNativeDirectorReadiness(host, session))(endpoint, payload, signal)
+        session => readNativeDirectorReadiness(host, session), prompt, relayDriver)(endpoint, payload, signal)
     }
     host.connection.rpc.handle('/qingmu-director-context', handler, {
       authority: 'loopback',

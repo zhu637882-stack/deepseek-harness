@@ -1573,7 +1573,7 @@ it('revalidates a replayed reference handoff through the actual command and read
       if (!result.ok) return { ok: false, reason: 'context_unavailable' }
       return { ok: true, context: result.value as DirectorContextSnapshot }
     },
-  }, undefined, undefined)
+  }, undefined, undefined, upstream.read)
   const payload = { sessionId: session.id, messageId: message.data.id, scope }
   const signal = new AbortController().signal
   const before = JSON.stringify(session.events)

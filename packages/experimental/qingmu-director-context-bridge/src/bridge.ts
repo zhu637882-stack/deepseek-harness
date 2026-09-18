@@ -7,7 +7,7 @@ import type {
   DirectorReplayProposal,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
 import { directorContextBindingStateSchema } from './projection.ts'
-import { readRelayState, relayBatchIsOpen } from './relay-state.ts'
+import { readRelayState, relayBatchIsOpen, type RelayState } from './relay-state.ts'
 import type {
   DirectorContextBindingState,
   DirectorContextBridge,
@@ -47,6 +47,14 @@ function hostAllowed(session: Session, owner: HostOwner): boolean {
     && Date.parse(relay.start.authorization.expiresAt) > Date.now()
 }
 
+/** Selection reads also work while paused; only execution requires a running batch. */
+function hostEnterable(session: Session, owner: HostOwner): boolean {
+  const relay = readRelayState(session)
+  return hostOwners.get(session) === owner && !owner.released && !owner.invalidated
+    && relay?.start.batchId === owner.batchId && (relay.mode === 'running' || relay.mode === 'paused')
+    && Date.parse(relay.start.authorization.expiresAt) > Date.now()
+}
+
 /** Whether a browser currently owns this session's object selection.
  * @param session Live director session.
  * @returns True while a browser view holds the object selection.
@@ -63,6 +71,19 @@ export function hasHostDirectorOwner(session: Session): boolean {
   return hostOwners.has(session)
 }
 
+/** Report the process-local Host lease's health for one batch without changing it.
+ * @param session Live director session.
+ * @param batchId Batch whose lease is inspected.
+ * @returns 'none' when no lease is recorded, 'foreign' when another batch holds it,
+ * 'dead' when the batch's own lease is invalidated or released, otherwise 'operational'.
+ */
+export function hostDirectorLeaseHealth(session: Session, batchId: string): 'none' | 'foreign' | 'operational' | 'dead' {
+  const owner = hostOwners.get(session)
+  if (!owner) return 'none'
+  if (owner.batchId !== batchId) return 'foreign'
+  return owner.invalidated || owner.released ? 'dead' : 'operational'
+}
+
 /** Invalidate without releasing in-flight operations.
  * @param session Leased director session. Explicit release is required before reacquisition.
  */
@@ -71,9 +92,68 @@ export function invalidateHostDirectorBinding(session: Session): void {
   if (owner) owner.invalidated = true
 }
 
-/** Claim a logged relay's selection without creating a browser lease. Only a `running` or `paused`
- * batch is claimable, so an explicit resume can reacquire the Host; `completed` and `closed` are terminal
- * and return the session to browser ownership.
+/** Release the Host lease of a terminal batch when the caller no longer holds the lease handle.
+ * In-flight operations settle before removal, matching the lease's own release semantics.
+ * @param session Leased director session.
+ * @param batchId Identity of the batch whose lease is released; a mismatch leaves the lease untouched.
+ */
+export function releaseHostDirectorBinding(session: Session, batchId: string): void {
+  const owner = hostOwners.get(session)
+  if (!owner || owner.batchId !== batchId) return
+  owner.released = true
+  if (owner.operations === 0) hostOwners.delete(session)
+  supersedePendingOperations(session)
+}
+
+/** Build the selection handle over one Host owner. `owned` marks the single handle that must release the
+ * owner; a borrowing drive reuses the lease that start or recovery already holds, so its release is a no-op
+ * and the batch keeps exactly one writer across drives.
+ * @param session Leased director session.
+ * @param owner Host owner the handle selects through.
+ * @param port Authoritative context reader.
+ * @param shots Ordered batch shots that bound which scopes the handle may select.
+ * @param owned True only for the handle that claimed the owner and must release it.
+ * @returns Shot selection and release; neither permits model or payment effects.
+ */
+function leaseHandle(session: Session, owner: HostOwner, port: DirectorContextReadPort,
+  shots: RelayState['start']['shots'], owned: boolean): {
+  enter(scope: DirectorObjectScope, signal?: AbortSignal): Promise<DirectorContextEntryResult>
+  release(): void
+} {
+  return {
+    async enter(scope, signal) {
+      if (!hostEnterable(session, owner)) throw new Error('Relay Host lease is no longer running.')
+      if (owner.operations > 0) throw new Error('Relay director operation is still busy.')
+      if (!shots.some(shot => scopeEquals(shot.scope, scope))) throw new Error('Shot scope is not in the relay batch.')
+      signal?.throwIfAborted()
+      owner.scope = { ...scope }
+      return enterBinding(session, scope, port, () => hostEnterable(session, owner), signal)
+    },
+    release() {
+      if (!owned || hostOwners.get(session) !== owner) return
+      owner.released = true
+      if (owner.operations === 0) hostOwners.delete(session)
+      supersedePendingOperations(session)
+    },
+  }
+}
+
+function claimNewOwner(session: Session, batchId: string, port: DirectorContextReadPort,
+  shots: RelayState['start']['shots']): {
+  enter(scope: DirectorObjectScope, signal?: AbortSignal): Promise<DirectorContextEntryResult>
+  release(): void
+} {
+  const owner: HostOwner = { batchId, scope: null, operations: 0, released: false, invalidated: false }
+  hostOwners.set(session, owner)
+  browserOwners.delete(session)
+  supersedePendingOperations(session)
+  return leaseHandle(session, owner, port, shots, true)
+}
+
+/** Claim a logged relay's selection exclusively, without creating a browser lease. Only a `running` or
+ * `paused` batch is claimable, so an explicit resume can reacquire the Host; `completed` and `closed` are
+ * terminal and return the session to browser ownership. Any existing Host owner rejects, so one writer holds
+ * the session and a sticky invalidation requires an explicit release before reacquisition.
  * @param session Session containing the relay's required state event.
  * @param batchId Exact unfinished batch identity.
  * @param port Authoritative context reader.
@@ -87,26 +167,34 @@ export function claimHostDirectorBinding(session: Session, batchId: string, port
   if (!relay || relay.start.batchId !== batchId || !relayBatchIsOpen(relay) || hostOwners.has(session)) {
     throw new Error('Relay batch does not have an available Host lease.')
   }
-  const owner: HostOwner = { batchId, scope: null, operations: 0, released: false, invalidated: false }
-  hostOwners.set(session, owner)
-  browserOwners.delete(session)
-  supersedePendingOperations(session)
-  return {
-    async enter(scope, signal) {
-      if (!hostAllowed(session, owner)) throw new Error('Relay Host lease is no longer running.')
-      if (owner.operations > 0) throw new Error('Relay director operation is still busy.')
-      if (!relay.start.shots.some(shot => scopeEquals(shot.scope, scope))) throw new Error('Shot scope is not in the relay batch.')
-      signal?.throwIfAborted()
-      owner.scope = { ...scope }
-      return enterBinding(session, scope, port, () => hostAllowed(session, owner), signal)
-    },
-    release() {
-      if (hostOwners.get(session) !== owner) return
-      owner.released = true
-      if (owner.operations === 0) hostOwners.delete(session)
-      supersedePendingOperations(session)
-    },
+  return claimNewOwner(session, batchId, port, relay.start.shots)
+}
+
+/** Reuse the batch's live Host lease for one drive, or claim it when the session is cold. A drive borrows the
+ * lease that `startRelayBatch` or `recoverRelayBatch` already holds, so its release is a no-op and the batch
+ * keeps its single writer across drives; a released, invalidated or foreign owner still rejects, so sticky
+ * invalidation and exclusive ownership cannot be bypassed by driving.
+ * @param session Session containing the relay's required state event.
+ * @param batchId Exact unfinished batch identity.
+ * @param port Authoritative context reader.
+ * @returns Shot selection over the reused or freshly claimed owner; release only drops a cold-claimed lease.
+ */
+export function borrowHostDirectorBinding(session: Session, batchId: string, port: DirectorContextReadPort): {
+  enter(scope: DirectorObjectScope, signal?: AbortSignal): Promise<DirectorContextEntryResult>
+  release(): void
+} {
+  const relay = readRelayState(session)
+  if (!relay || relay.start.batchId !== batchId || !relayBatchIsOpen(relay)) {
+    throw new Error('Relay batch does not have an available Host lease.')
   }
+  const existing = hostOwners.get(session)
+  if (existing) {
+    if (existing.batchId !== batchId || existing.released || existing.invalidated) {
+      throw new Error('Relay batch does not have an available Host lease.')
+    }
+    return leaseHandle(session, existing, port, relay.start.shots, false)
+  }
+  return claimNewOwner(session, batchId, port, relay.start.shots)
 }
 
 /** Retain Host ownership until an admitted asynchronous operation has settled.

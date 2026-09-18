@@ -3,7 +3,7 @@
  */
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
-import { claimHostDirectorBinding } from './bridge.ts'
+import { claimHostDirectorBinding, hasHostDirectorOwner, hostDirectorLeaseHealth, releaseHostDirectorBinding } from './bridge.ts'
 import {
   appendRelayState, createRelayState, readRelayState, relayBatchIsOpen,
   type RelayState,
@@ -106,7 +106,7 @@ export function advanceRelayBatch(
 }
 
 /** Complete a batch where all items have terminal evidence.
- * Sets mode to 'completed'. Terminal — cannot be reopened.
+ * Sets mode to 'completed'. Terminal — cannot be reopened. Releases the Host lease.
  * @param session Session that owns the batch ledger.
  * @param now ISO timestamp for the ledger update.
  * @returns The updated validated state.
@@ -120,11 +120,13 @@ export function completeRelayBatch(
   if (!current || !relayBatchIsOpen(current)) throw new Error('No open relay batch.')
   assertAllSettled(current)
   const next: RelayState = { ...current, revision: current.revision + 1, updatedAt: now, mode: 'completed', reason: null }
-  return appendRelayState(session, next, current.revision)
+  const saved = appendRelayState(session, next, current.revision)
+  releaseHostDirectorBinding(session, current.start.batchId)
+  return saved
 }
 
 /** Close a batch that cannot continue (expired, all items abandoned, etc).
- * Sets mode to 'closed'. Terminal — cannot be reopened.
+ * Sets mode to 'closed'. Terminal — cannot be reopened. Releases the Host lease.
  * Non-settled items are abandoned; settled items retain their evidence.
  * @param session Session that owns the batch ledger.
  * @param reason Human-readable close reason stored in the ledger.
@@ -147,7 +149,9 @@ export function closeRelayBatch(
     reason,
     items: current.items.map(item => isSettled(item) ? item : { ...item, phase: 'abandoned' as const, reason }),
   }
-  return appendRelayState(session, next, current.revision)
+  const saved = appendRelayState(session, next, current.revision)
+  releaseHostDirectorBinding(session, current.start.batchId)
+  return saved
 }
 
 /** Cold recovery: re-establish Host lease from durable session state.
@@ -167,6 +171,26 @@ export function recoverRelayBatch(
   if (!state || !relayBatchIsOpen(state)) return null
   const lease = claimHostDirectorBinding(session, state.start.batchId, port)
   return { state, lease }
+}
+
+/** Release a dead Host lease so cold recovery can re-claim the batch.
+ * Only an invalidated or already-released owner of the exact open batch is released; a healthy or foreign
+ * lease is refused, so a live writer is never dropped under itself.
+ * @param session Session containing the relay's durable state event.
+ * @param batchId Exact open-batch identity; a mismatch leaves every lease untouched.
+ * @returns settling: true while the released owner's in-flight operations drain before removal.
+ * @throws When the batch is missing, terminal, or mismatched; when no lease exists; or when the lease is healthy.
+ */
+export function releaseDeadRelayHostLease(session: Session, batchId: string): { settling: boolean } {
+  const state = readRelayState(session)
+  if (!state || !relayBatchIsOpen(state) || state.start.batchId !== batchId) {
+    throw new Error('No open relay batch with this identity.')
+  }
+  const health = hostDirectorLeaseHealth(session, batchId)
+  if (health === 'operational' || health === 'foreign') throw new Error('A live Host lease cannot be released.')
+  if (health === 'none') throw new Error('No Host lease exists for this batch.')
+  releaseHostDirectorBinding(session, batchId)
+  return { settling: hasHostDirectorOwner(session) }
 }
 
 function assertAllSettled(state: RelayState): void {

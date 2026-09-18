@@ -7,14 +7,16 @@ import type { DirectorReplayProposal } from '@deepseek-ai/dsh-experimental-qingm
 import { createDirectorContextBridge } from './bridge.ts'
 import { latestNativeDraftProposal, readNativeDraftInput, type NativeDraftReaders } from './native-draft.ts'
 import { latestNativeFirstDraftProposal, readNativeFirstDraftInput } from './native-first-draft.ts'
+import { verifyReferenceHandoff, type ReferenceHandoff } from './reference-handoff.ts'
 import type { NativeFirstDraftProposalResult } from './types.ts'
 import type {
   DirectorContextBridgeRpcResult, DirectorContextReadPort, DirectorObjectScope, NativeDraftProposalResult, NativeDirectorReadiness,
 } from './types.ts'
 import {
   readRelayBatch, startRelayBatch, admitRelayDirector, advanceRelayBatch,
-  completeRelayBatch, closeRelayBatch, recoverRelayBatch,
+  completeRelayBatch, closeRelayBatch, recoverRelayBatch, releaseDeadRelayHostLease,
 } from './relay-controller.ts'
+import type { RelayDriveReport } from './relay-runner.ts'
 import type { RelayState } from './relay-state.ts'
 
 const bad = (message: string): RpcResult<never> => ({
@@ -42,19 +44,28 @@ function scope(value: unknown): DirectorObjectScope | null {
  * Build the safe browser facade; it never returns Yimeng tokens or Host permits.
  * @param sessions Host-owned durable session lookup.
  * @param port Host-only Yimeng context reader.
- * @returns A loopback RPC handler limited to context binding and advisory proposal lineage.
+ * @param draftReaders Optional native prompt and first-draft proposal readers.
+ * @param readiness Optional scoped native tool registration check.
+ * @param referenceReader Optional loopback reader for the saved reference draft.
+ * @param relayDriver Optional Host drive for an open batch, cancelled with the calling RPC signal;
+ * absent when no live agent registry is mounted.
+ * @returns A loopback RPC handler limited to context binding, advisory proposal lineage,
+ * native readiness and reference handoff evidence.
  */
 export function createDirectorContextRpcHandler(
   sessions: Pick<SessionStore, 'get'>,
   port: DirectorContextReadPort,
   draftReaders?: NativeDraftReaders,
   readiness?: (session: Session) => NativeDirectorReadiness,
+  referenceReader?: ConnectionRpcHandler,
+  relayDriver?: (session: Session, signal: AbortSignal) => Promise<RelayDriveReport>,
 ): ConnectionRpcHandler {
   const bridge = createDirectorContextBridge(port)
   type Result = DirectorContextBridgeRpcResult | NativeDraftProposalResult | NativeFirstDraftProposalResult
-    | NativeDirectorReadiness | RelayState | null
+    | NativeDirectorReadiness | ReferenceHandoff | RelayState | null | RelayDriveReport
     | { readonly state: RelayState }
     | { readonly state: RelayState | null; readonly recovered: boolean }
+    | { readonly settling: boolean }
   return async (endpoint, payload, signal): Promise<RpcResult<Result>> => {
     try {
       const raw = object(payload)
@@ -63,6 +74,13 @@ export function createDirectorContextRpcHandler(
       }
       const session = sessions.get(SessionId(raw.sessionId))
       if (session === undefined) return bad('director context session unavailable')
+      if (endpoint === 'readReferenceHandoff') {
+        if (!exact(raw, ['sessionId', 'messageId', 'scope']) || id(raw.messageId) === null) return bad('reference handoff fields invalid')
+        const requested = scope(raw.scope)
+        if (requested === null) return bad('reference handoff scope invalid')
+        signal.throwIfAborted()
+        return { ok: true, value: await verifyReferenceHandoff(session, raw.messageId as string, requested, port, referenceReader, signal) }
+      }
       if (endpoint === 'readNativeDirectorReadiness') {
         if (!exact(raw, ['sessionId'])) return bad('native readiness fields invalid')
         signal.throwIfAborted()
@@ -168,6 +186,17 @@ export function createDirectorContextRpcHandler(
         return { ok: true, value: recovered
           ? { state: recovered.state, recovered: true }
           : { state: null, recovered: false } }
+      }
+      if (endpoint === 'releaseRelayHostLease') {
+        if (!exact(raw, ['sessionId', 'batchId']) || id(raw.batchId) === null) return bad('relay lease release fields invalid')
+        signal.throwIfAborted()
+        return { ok: true, value: releaseDeadRelayHostLease(session, raw.batchId as string) }
+      }
+      if (endpoint === 'driveRelayBatch') {
+        if (!exact(raw, ['sessionId'])) return bad('relay drive fields invalid')
+        if (!relayDriver) return bad('relay driver unavailable')
+        signal.throwIfAborted()
+        return { ok: true, value: await relayDriver(session, signal) }
       }
       return bad('unknown director context operation')
     } catch {
