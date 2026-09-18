@@ -30,7 +30,7 @@ When the facade lacks relay methods — an older embedded caller or a test doubl
 
 ## Consequences
 
-An operator can now create a batch with an explicit, capped, expiring authorization from the normal shooting workspace, watch batch mode and per-shot phases, pause a running batch before admissions begin, recover a lease after a Host restart, and close or complete a batch with its reason recorded — all without touching RPC tooling. The only payment-relevant browser act is the explicit authorization recorded at creation; generation submission remains Host-driven inside that authorization. The costs: progress does not live-refresh (the operator presses 刷新状态), and admission plus submission still have no production driver, so a created batch waits for the Host side to advance it.
+An operator can now create a batch with an explicit, capped, expiring authorization from the normal shooting workspace, watch batch mode and per-shot phases, pause a running batch before admissions begin, recover a lease after a Host restart, and close or complete a batch with its reason recorded — all without touching RPC tooling. The only payment-relevant browser act is the explicit authorization recorded at creation; generation submission remains Host-driven inside that authorization. The costs: progress does not live-refresh (the operator presses 刷新状态), and the panel's periodic drive is now only a UI-level nudge — the [Host drive loop](2026-09-19-qingmu-relay-host-drive-loop.md) owns the batch's unattended propulsion.
 
 ## Testing
 

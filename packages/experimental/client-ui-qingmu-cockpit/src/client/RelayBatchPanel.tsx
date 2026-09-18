@@ -16,7 +16,8 @@ const ratios = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16'] as const
 const costPattern = /^\d+(?:\.\d{1,6})?$/u
 const waitingLabels: Record<string, string> = {
   'agent-busy': '导演会话正忙，稍候自动继续。',
-  'agent-unavailable': '导演代理不在线，请保持导演会话页面打开。',
+  'agent-unavailable': '导演代理不在线；重启后请先打开一次导演会话页面，之后页面可以关闭，Host 会继续接力。',
+  'drive-in-progress': '一次驱动正在进行，稍候自动继续。',
   'read-port-unavailable': '读取端口不可用。',
   'run-in-flight': '生成进行中，稍后自动查询结果。',
   'dispatch-unconfirmed': '提交结果未确认，将按原请求号核实，不会重复扣费。',

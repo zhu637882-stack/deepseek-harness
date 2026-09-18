@@ -164,7 +164,7 @@ Cordis plugin 注册 `qingmuDirectorContext` Session projection 和仅限 loopba
 - 原生工具不启用真实 DeepSeek 路由、费用或生产 canary；可选的专属素材连接只允许显式 DashScope 临时上传。
 - 胶囊晋升路由要求同源浏览器请求——无 `authorization` 头、`origin` 与自身 `host` 一致——不要求会话 cookie。它写的两个胶囊文件本来就能被以本用户身份运行的任何进程直接写，而该路由从不向 Writer 会话存储校验的 cookie 只会平添一个操作者浏览器无法满足的登录。该栅栏拦住的是其他源站页面和普通工具调用，拦不住有意为之的本机调用者。
 
-loopback `/qingmu-director-context` RPC 与驾驶舱接力面板已端到端驱动批次：`driveRelayBatch` 在一把已接管的 Host 租约下运行准入-准备-预留-派发-收片循环，start、advance、recover、complete 与 close 也一并接入。当某镜的运行仅在途时，驱动会准入并准备下一镜直到其交接，但绝不为它预留或派发，因此该镜只在当前运行落定后才进入付费队列。付费派发因此同时只保持一笔未结算提交；跨镜并行付费生成与线上生产启用仍延后。
+loopback `/qingmu-director-context` RPC 与驾驶舱接力面板共用同一个 Host 侧驱动循环：`driveRelayBatch` 在一把已接管的 Host 租约下运行准入-准备-预留-派发-收片循环，start、advance、recover、complete 与 close 也一并接入。`apply()` 启动 `relayDriveIntervalMs`（默认 15000）的心跳，驱动由接力 session 事件登记的每个开放批次，因此创建后浏览器页面即可关闭；浏览器周期调用与心跳共用同一按 session 的单飞门，且心跳只驱动 `running` 批次，暂停批次的恢复路径保持显式。当某镜的运行仅在途时，驱动会准入并准备下一镜直到其交接，但绝不为它预留或派发，因此该镜只在当前运行落定后才进入付费队列。付费派发因此同时只保持一笔未结算提交；跨镜并行付费生成与线上生产启用仍延后。循环按次解析存活 agent，绝不自行 resume：Host 重启后，操作者打开一次面板（租约恢复）即重新 attach 该 session，此后心跳再次无人值守地推进批次。见[驱动循环决策](../../../.agents/notes/implemented/feature/2026-09-19-qingmu-relay-host-drive-loop.zh.md)。
 
 `releaseRelayHostLease` 是由操作员显式触发的失效 Host 租约释放。被一次失败的持久 flush 作废的租约否则会卡死其未结批次——驱动拒绝它，恢复无法重新接管，只有关闭批次（放弃未完成镜头）才能腾出。该释放失败即拒：要求精确的未结批次身份和一个已作废或已释放的 owner，拒绝健康或他人的租约，并等待进行中的操作收尾后才移除 owner。随后恢复即可在镜头全数保留的情况下重新接管批次。
 
