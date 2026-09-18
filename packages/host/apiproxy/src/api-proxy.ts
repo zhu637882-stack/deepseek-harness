@@ -747,6 +747,36 @@ function repairMalformedJson(raw: string): string {
       continue
     }
 
+    let fixedInterior = false
+    let si = 0
+    let sInStr = false
+    let sEsc = false
+    const chars = [...s]
+    while (si < chars.length) {
+      const c = chars[si]
+      if (sEsc) { sEsc = false; si++; continue }
+      if (c === '\\' && sInStr) { sEsc = true; si++; continue }
+      if (c === '"') {
+        if (!sInStr) {
+          sInStr = true
+        } else {
+          let nj = si + 1
+          while (nj < chars.length && (chars[nj] === ' ' || chars[nj] === '\t' || chars[nj] === '\n' || chars[nj] === '\r')) nj++
+          if (nj >= chars.length || chars[nj] === ',' || chars[nj] === '}' || chars[nj] === ']' || chars[nj] === ':') {
+            sInStr = false
+          } else {
+            chars[si] = '\\"'
+            fixedInterior = true
+          }
+        }
+      }
+      si++
+    }
+    if (fixedInterior) {
+      s = chars.join('')
+      continue
+    }
+
     break
   }
 
