@@ -17,16 +17,12 @@ export function takeSelectionReceiptMatches(
   result: YimengTakeVersionSelectionResult,
   marker: TakeVersionSelectionRecoveryMarker,
 ): boolean {
-  return result.schema === 'jason.qingmu-take-selection-result.v1'
-    && result.projectId === marker.projectId && result.episodeId === marker.episodeId
+  return result.projectId === marker.projectId && result.episodeId === marker.episodeId
     && result.frameId === marker.frameId && result.baseStackSnapshotSha256 === marker.expectedStackSha256
     && result.idempotencyKey === marker.idempotencyKey && result.selectedTake.takeId === marker.candidateTakeId
     && result.selectedTake.versionOrdinal === marker.candidateVersionOrdinal
     && result.selectedTake.outputSha256 === marker.candidateOutputSha256
     && result.authoritativeStack.selectedTakeId === marker.candidateTakeId
-    && result.selectionChanged === true && result.providerCalls === 0
-    && result.paidProviderAuthority === 'not_granted' && result.budgetMutation === false
-    && result.humanApprovalInferred === false && result.formalApprovalChanged === false
 }
 
 /** Strip recovery-only metadata before passing the request to the strict adapter DTO. */

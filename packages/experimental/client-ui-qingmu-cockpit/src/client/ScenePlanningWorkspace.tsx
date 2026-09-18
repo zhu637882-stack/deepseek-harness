@@ -79,6 +79,10 @@ function objectOf(value: unknown): Record<string, unknown> | null {
     : null
 }
 
+function textOf(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+}
+
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
@@ -320,11 +324,11 @@ export function ScenePlanningWorkspace({
   useEffect(() => {
     const operation = new AbortController()
     setPaidAvailability(null); clearPaidProposal()
-    if (presentation === 'assistant' || port.readDirectorProviderAvailability === undefined) return () => operation.abort()
+    if (presentation === 'assistant' || port.readDirectorProviderAvailability === undefined) return () => { operation.abort() }
     void port.readDirectorProviderAvailability({ projectId, episodeId }, operation.signal)
       .then((value) => { if (!operation.signal.aborted) setPaidAvailability(value) })
       .catch(() => { if (!operation.signal.aborted) setPaidAvailability(null) })
-    return () => operation.abort()
+    return () => { operation.abort() }
   }, [episodeId, port, projectId, presentation])
   const update = (next: LocalPlan | null) => {
     try {
@@ -596,7 +600,8 @@ export function ScenePlanningWorkspace({
         const status = await readWorkOrderStatus({
           projectId, episodeId, generationTaskId: workOrder.generationTaskId,
         }, operation.signal)
-        if (!isLive() || operation.signal.aborted) return
+        if (!isLive()) return
+        operation.signal.throwIfAborted()
         setPaidStatus(status)
         if (status.state === 'settled' || status.state === 'submission_unknown'
           || status.state === 'unknown' || status.state === 'failed') return
@@ -1109,7 +1114,7 @@ export function ScenePlanningWorkspace({
           <dt>请求边界</dt><dd>{paidAvailability.maxInputTokens} 输入 / {paidAvailability.maxOutputTokens} 输出 token；最多 1 次；0 重试</dd></dl>}
         {visiblePaidWorkOrder && <dl><dt>本次预估</dt><dd>¥{visiblePaidWorkOrder.pricingSnapshot.estimatedAmountCny}</dd>
           <dt>任务状态</dt><dd>{visiblePaidStatus?.state ?? visiblePaidWorkOrder.dispatchState}</dd>
-          <dt>实际账单</dt><dd>{String(objectOf(visiblePaidStatus?.costAccounting)?.actualAmountCny ?? '待 Provider 账单对账')}</dd></dl>}
+          <dt>实际账单</dt><dd>{textOf(objectOf(visiblePaidStatus?.costAccounting)?.actualAmountCny) || '待 Provider 账单对账'}</dd></dl>}
         {(() => {
           const receipt = objectOf(visiblePaidStatus?.executionReceipt)
           const providerProposal = objectOf(receipt?.proposal)
@@ -1119,11 +1124,11 @@ export function ScenePlanningWorkspace({
             if (item === null || typeof item.field !== 'string') return null
             const field = item.field as keyof PlanningShot
             return <article key={typeof item.id === 'string' ? item.id : itemIndex} className={css.proposalCard}>
-              <dl><dt>当前原值</dt><dd>{String(current[field] ?? '') || '（空）'}</dd>
-                <dt>真实 Provider 建议</dt><dd>{String(item.proposedValue ?? '') || '（空）'}</dd>
-                <dt>影响</dt><dd>{String(item.impact ?? '')}</dd></dl>
+              <dl><dt>当前原值</dt><dd>{String(current[field]) || '（空）'}</dd>
+                <dt>真实 Provider 建议</dt><dd>{textOf(item.proposedValue) || '（空）'}</dd>
+                <dt>影响</dt><dd>{textOf(item.impact)}</dd></dl>
               <button type="button"
-                disabled={busy || paidBusy || !current || adoptedPaidItems.includes(String(item.id))
+                disabled={busy || paidBusy || adoptedPaidItems.includes(String(item.id))
                   || adoptedProposalItems.length > 0}
                 onClick={() => { adoptPaidProposalItem(item) }}>
                 {adoptedPaidItems.includes(String(item.id)) ? '已放入草稿' : '采用到草稿'}

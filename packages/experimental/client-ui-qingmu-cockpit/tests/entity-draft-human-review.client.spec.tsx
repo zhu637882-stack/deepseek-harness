@@ -6,6 +6,18 @@ import { zh } from '../src/client/locales.ts'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input
+  if (input instanceof URL) return input.href
+  return input.url
+}
+
+function jsonBody(init: RequestInit | undefined): Record<string, unknown> {
+  const body = init?.body
+  if (typeof body !== 'string') throw new Error('expected a JSON string request body')
+  return JSON.parse(body) as Record<string, unknown>
+}
+
 const state = {
   schema: 'jason.qingmu-entity-draft-human-review-state.v1',
   identity: { naturalPersonId: 'person-owner', state: 'bound' },
@@ -31,7 +43,7 @@ describe('entity draft natural-person review panel', () => {
     let authenticated = false
     const sent: Record<string, unknown>[] = []
     const fetchMock = vi.fn<typeof globalThis.fetch>(async (input, init) => {
-      const url = String(input)
+      const url = requestUrl(input)
       if (url === '/api/qingmu/editorial-handoff/human-session') {
         authenticated = true
         return Response.json({ authenticated: true })
@@ -40,7 +52,7 @@ describe('entity draft natural-person review panel', () => {
         return authenticated ? Response.json(state) : Response.json({ code: 'relogin' }, { status: 401 })
       }
       if (url.startsWith('/api/qingmu/entity-draft-human-review/decision')) {
-        sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+        sent.push(jsonBody(init))
         return Response.json({ schema: 'jason.qingmu-entity-draft-human-review-receipt.v1' })
       }
       throw new Error(`unexpected request ${url}`)
@@ -73,7 +85,7 @@ describe('entity draft natural-person review panel', () => {
   it('returns an expired decision session to explicit login without retrying the decision', async () => {
     let decisionCalls = 0
     const fetchMock = vi.fn<typeof globalThis.fetch>(async (input) => {
-      const url = String(input)
+      const url = requestUrl(input)
       if (url.startsWith('/api/qingmu/entity-draft-human-review/state')) return Response.json(state)
       if (url.startsWith('/api/qingmu/entity-draft-human-review/decision')) {
         decisionCalls += 1
@@ -111,13 +123,13 @@ describe('entity draft natural-person review panel', () => {
     const sentUrls: string[] = []
     const sentBodies: Record<string, unknown>[] = []
     const fetchMock = vi.fn<typeof globalThis.fetch>(async (input, init) => {
-      const url = String(input)
+      const url = requestUrl(input)
       if (url.startsWith('/api/qingmu/entity-draft-human-review/state')) {
         return Response.json({ ...state, drafts: [firstDraft, secondDraft] })
       }
       if (url.startsWith('/api/qingmu/entity-draft-human-review/decision')) {
         sentUrls.push(url)
-        sentBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+        sentBodies.push(jsonBody(init))
         return Response.json({ schema: 'jason.qingmu-entity-draft-human-review-receipt.v1' })
       }
       throw new Error(`unexpected request ${url}`)
@@ -132,7 +144,7 @@ describe('entity draft natural-person review panel', () => {
     fireEvent.click(screen.getByLabelText(/我已核对当前 PromptIR.*雨夜旧车站/))
     expect(screen.getByRole('button', { name: /接受当前实体草稿.*雨夜旧车站/ }).hasAttribute('disabled')).toBe(false)
     expect(screen.getByRole('button', { name: /接受当前实体草稿.*老站长/ }).hasAttribute('disabled')).toBe(true)
-    expect((screen.getByLabelText(/审核备注.*老站长/) as HTMLTextAreaElement).value).toBe('')
+    expect(screen.getByLabelText<HTMLTextAreaElement>(/审核备注.*老站长/).value).toBe('')
 
     fireEvent.click(screen.getByRole('button', { name: /接受当前实体草稿.*雨夜旧车站/ }))
     await waitFor(() => { expect(sentBodies).toHaveLength(1) })

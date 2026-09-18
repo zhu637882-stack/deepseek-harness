@@ -123,7 +123,7 @@ export function FirstFrameCandidatePreview({
       if (!sameScope(result, request)) throw new Error('first-frame preview source changed')
       const bytes = decodeCandidate(result)
       if (await sha256(bytes) !== request.expectedMaterializedSha256) throw new Error('first-frame preview hash mismatch')
-      if (run.signal.aborted) return
+      run.signal.throwIfAborted()
       blob.current = URL.createObjectURL(new Blob([bytes.slice().buffer], { type: result.mimeType }))
       setUrl(blob.current)
       onPreviewReady?.(blob.current)

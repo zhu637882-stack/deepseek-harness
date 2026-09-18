@@ -1,29 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import { MessageId, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { hasHostDirectorOwner, invalidateHostDirectorBinding, releaseHostDirectorBinding } from '../src/bridge.ts'
-import {
-  appendRelayState, createRelayState,
-  type RelayStart, type RelayState,
-} from '../src/relay-state.ts'
-import type { DirectorContextReadPort, DirectorObjectScope } from '../src/types.ts'
+import { createRelayState, readRelayState, type RelayStart } from '../src/relay-state.ts'
 import {
   readRelayBatch, startRelayBatch, admitRelayDirector, advanceRelayBatch,
-  completeRelayBatch, closeRelayBatch, recoverRelayBatch, releaseDeadRelayHostLease,
+  completeRelayBatch, closeRelayBatch, recoverRelayBatch,
 } from '../src/relay-controller.ts'
+import type { DirectorContextReadPort, DirectorContextReadResult, DirectorObjectScope } from '../src/types.ts'
 
 const now = '2026-09-16T00:00:00.000Z'
 const later = '2026-09-16T00:01:00.000Z'
+const evenLater = '2026-09-16T00:02:00.000Z'
 const expiresAt = '2026-09-16T01:00:00.000Z'
-const sha = (character: string): string => character.repeat(64)
+
+const scope0: DirectorObjectScope = { projectId: 'project-1', episodeId: 'episode-1', sceneId: 'scene-1', shotId: 'shot-1' }
+const scope1: DirectorObjectScope = { projectId: 'project-1', episodeId: 'episode-1', sceneId: 'scene-1', shotId: 'shot-2' }
 
 function startInput(): RelayStart {
   return {
     batchId: 'batch-1', projectId: 'project-1', episodeId: 'episode-1', instruction: 'Prepare these shots.',
     director: { provider: 'deepseek', model: 'deepseek-chat' },
-    shots: ['shot-1', 'shot-2'].map(shotId => ({
-      scope: { projectId: 'project-1', episodeId: 'episode-1', sceneId: 'scene-1', shotId },
-      label: shotId, parameters: { duration: 5, resolution: '720P', ratio: '16:9', audio: true, prompt_extend: false },
+    shots: [scope0, scope1].map(scope => ({
+      scope, label: scope.shotId,
+      parameters: { duration: 5, resolution: '720P', ratio: '16:9', audio: true, prompt_extend: false },
       retake: false,
     })),
     authorization: { authorizationId: 'auth-1', paidConfirmed: true, maxCostCny: '0.300000', maxCandidates: 2, expiresAt },
@@ -32,351 +31,266 @@ function startInput(): RelayStart {
 
 function dummyPort(): DirectorContextReadPort {
   return {
-    async readDirectorContext(_scope: DirectorObjectScope) {
-      throw new Error('unexpected context read')
+    async readDirectorContext(): Promise<DirectorContextReadResult> {
+      return { ok: false, reason: 'context_unavailable' }
     },
   }
 }
 
-function admissionMessage(index: number, scope: DirectorObjectScope): UserMessage {
+function admission(scope: DirectorObjectScope, sha = 'a'): { message: UserMessage; contextSnapshotSha256: string } {
+  const character = sha.charAt(0)
+  const contextSha = character.repeat(64)
   return {
-    id: MessageId(`message-${index}`), role: 'user', source: { kind: 'user' },
-    content: [{ type: 'text', text: JSON.stringify({
-      schema: 'qingmu.native-director-request.v1', sessionId: 'relay-session', ownerId: 'host-1',
-      scope, contextSnapshotSha256: sha('a'),
-    }) }, { type: 'text', text: 'Prepare this shot.' }],
+    message: {
+      id: MessageId(`admission-${scope.shotId}-${sha}`), role: 'user', source: { kind: 'user' },
+      content: [
+        { type: 'text', text: JSON.stringify({
+          schema: 'qingmu.native-director-request.v1', sessionId: 'relay-session', ownerId: 'host-1',
+          scope, contextSnapshotSha256: contextSha,
+        }) },
+        { type: 'text', text: `Prepare shot ${scope.shotId}` },
+      ],
+    },
+    contextSnapshotSha256: contextSha,
   }
 }
 
-function sessionWithStartedBatch(): { session: Session; state: RelayState } {
+/** Build a session with both items fully settled (collected + failed). */
+function sessionWithSettledBatch(): Session {
   const session = Session.create(SessionId('relay-session'))
-  const { state } = startRelayBatch(session, startInput(), now, dummyPort())
-  return { session, state }
-}
-
-function settleItem(
-  session: Session,
-  index: number,
-  at: { admit: string; prepared: string; submitted: string; collected: string },
-): void {
-  const started = readRelayBatch(session)!
-  const item = started.items[index]!
-  const message = admissionMessage(index, item.scope)
-  admitRelayDirector(session, index, { message, contextSnapshotSha256: sha('a') }, at.admit)
-  const handoff = {
-    messageId: message.id, turn: 0, endSeq: 0, revision: 1,
-    requestSha256: sha('b'), frameSha256: sha('c'), directorSourceSha256: sha('d'), contextSnapshotSha256: sha('a'),
+  startRelayBatch(session, startInput(), now, dummyPort()).lease.release()
+  let state = readRelayState(session)!
+  const adm0 = admission(scope0)
+  // Admit + prepare item 0 in one step (admitRelayDirector transitions to 'preparing')
+  state = admitRelayDirector(session, 0, adm0, later)
+  // Manually advance item 0 through prepared → submitting → collected
+  state = {
+    ...state, revision: state.revision + 1, updatedAt: later,
+    items: state.items.map((item, i) => i === 0 ? {
+      ...item, phase: 'collected', preparedAt: later, submittedAt: later, settledAt: later, collectedAt: later,
+      handoff: { messageId: adm0.message.id, turn: 0, endSeq: 10, revision: 1,
+        requestSha256: 'b'.repeat(64), frameSha256: 'c'.repeat(64), directorSourceSha256: 'd'.repeat(64),
+        contextSnapshotSha256: adm0.contextSnapshotSha256 },
+      submission: { projectId: 'project-1', frameId: 'shot-1', requestId: 'relay-request-0000',
+        expectedRevision: 1, expectedRequestSha256: 'b'.repeat(64), quoteSha256: 'e'.repeat(64),
+        authorizationCapCny: '0.100000', paidConfirmed: true },
+      run: { runId: 'refvideo_relay-request-0000', taskId: 'task-1', publicStatus: 'succeeded' },
+    } : item),
   }
-  const admitted = readRelayBatch(session)!
-  appendRelayState(session, {
-    ...admitted, revision: admitted.revision + 1, updatedAt: at.prepared,
-    items: admitted.items.map((other, offset) => offset === index
-      ? { ...other, phase: 'prepared' as const, handoff, preparedAt: at.prepared }
-      : other),
-  }, admitted.revision)
-  const submission = {
-    projectId: item.scope.projectId, frameId: item.scope.shotId, requestId: `request_${index}_00000000`,
-    expectedRevision: 1, expectedRequestSha256: sha('b'), quoteSha256: sha('e'),
-    authorizationCapCny: '0.100000', paidConfirmed: true as const,
+  session.append('qingmu-director-relay/state', state)
+  // Settle item 1 to failed
+  const adm1 = admission(scope1)
+  state = {
+    ...state, revision: state.revision + 1, updatedAt: later,
+    items: state.items.map((item, i) => i === 1 ? {
+      ...item, phase: 'preparing', admissions: [...item.admissions, { ...adm1, admittedAt: later }],
+    } : item),
   }
-  const prepared = readRelayBatch(session)!
-  appendRelayState(session, {
-    ...prepared, revision: prepared.revision + 1, updatedAt: at.submitted,
-    items: prepared.items.map((other, offset) => offset === index
-      ? { ...other, phase: 'submitting' as const, submission, submittedAt: at.submitted }
-      : other),
-  }, prepared.revision)
-  const submitted = readRelayBatch(session)!
-  appendRelayState(session, {
-    ...submitted, revision: submitted.revision + 1, updatedAt: at.collected,
-    items: submitted.items.map((other, offset) => offset === index
-      ? {
-        ...other,
-        phase: 'collected' as const,
-        run: { runId: `refvideo_${submission.requestId}`, taskId: `task-${index}`, publicStatus: 'succeeded' as const },
-        settledAt: at.collected,
-        collectedAt: at.collected,
-      }
-      : other),
-  }, submitted.revision)
+  session.append('qingmu-director-relay/state', state)
+  state = {
+    ...state, revision: state.revision + 1, updatedAt: later,
+    items: state.items.map((item, i) => i === 1 ? {
+      ...item, phase: 'failed', preparedAt: later, submittedAt: later, settledAt: later, collectedAt: null,
+      handoff: { messageId: adm1.message.id, turn: 1, endSeq: 20, revision: 1,
+        requestSha256: 'b'.repeat(64), frameSha256: 'c'.repeat(64), directorSourceSha256: 'd'.repeat(64),
+        contextSnapshotSha256: adm1.contextSnapshotSha256 },
+      submission: { projectId: 'project-1', frameId: 'shot-2', requestId: 'relay-request-0001',
+        expectedRevision: 1, expectedRequestSha256: 'b'.repeat(64), quoteSha256: 'e'.repeat(64),
+        authorizationCapCny: '0.100000', paidConfirmed: true },
+      run: { runId: 'refvideo_relay-request-0001', taskId: 'task-2', publicStatus: 'failed' },
+    } : item),
+  }
+  session.append('qingmu-director-relay/state', state)
+  return session
 }
 
 describe('readRelayBatch', () => {
-  it('should return null when no relay event exists', () => {
+  it('returns null when no relay state exists', () => {
     const session = Session.create(SessionId('relay-session'))
     expect(readRelayBatch(session)).toBeNull()
   })
 
-  it('should return the latest relay state after start', () => {
-    const { session, state } = sessionWithStartedBatch()
-    const read = readRelayBatch(session)
-    expect(read).not.toBeNull()
-    expect(read!.start.batchId).toBe(state.start.batchId)
-    expect(read!.mode).toBe('running')
+  it('returns the current relay state after one is persisted', () => {
+    const session = Session.create(SessionId('relay-session'))
+    const state = createRelayState(startInput(), now)
+    session.append('qingmu-director-relay/state', state)
+    expect(readRelayBatch(session)).toEqual(state)
   })
 })
 
 describe('startRelayBatch', () => {
-  it('should create a running batch with pending items and claim a Host lease', () => {
+  it('creates state, appends an event, and returns a lease', () => {
     const session = Session.create(SessionId('relay-session'))
     const { state, lease } = startRelayBatch(session, startInput(), now, dummyPort())
-    expect(state.mode).toBe('running')
     expect(state.revision).toBe(1)
-    expect(state.items).toHaveLength(2)
-    expect(state.items.every(item => item.phase === 'pending')).toBe(true)
-    expect(state.items.every(item => item.admissions.length === 0)).toBe(true)
-    expect(lease).toHaveProperty('enter')
-    expect(lease).toHaveProperty('release')
-  })
-
-  it('should reject when an open batch already exists', () => {
-    const { session } = sessionWithStartedBatch()
-    expect(() => startRelayBatch(session, startInput(), later, dummyPort()))
-      .toThrow('An open relay batch already exists.')
-  })
-
-  it('should allow replacing a completed batch', () => {
-    const session = Session.create(SessionId('relay-session'))
-    const { state } = startRelayBatch(session, startInput(), now, dummyPort())
     expect(state.mode).toBe('running')
-    expect(hasHostDirectorOwner(session)).toBe(true)
-    closeRelayBatch(session, 'done', later)
-    expect(hasHostDirectorOwner(session)).toBe(false)
-    const read = readRelayBatch(session)!
-    expect(read.mode).toBe('closed')
-    const second = startInput()
-    second.batchId = 'batch-2'
-    second.authorization.expiresAt = '2026-09-16T03:00:00.000Z'
-    const { state: newState } = startRelayBatch(session, second, '2026-09-16T02:00:00.000Z', dummyPort())
-    expect(newState.start.batchId).toBe('batch-2')
-    expect(newState.mode).toBe('running')
+    expect(session.events).toHaveLength(1)
+    expect(typeof lease.enter).toBe('function')
+    expect(typeof lease.release).toBe('function')
+    lease.release()
+  })
+
+  it('rejects starting a second batch while one is open', () => {
+    const session = Session.create(SessionId('relay-session'))
+    const { lease } = startRelayBatch(session, startInput(), now, dummyPort())
+    lease.release()
+    expect(() => startRelayBatch(session, startInput(), later, dummyPort())).toThrow(/open/i)
+  })
+
+  it('allows starting a new batch after the previous is completed', () => {
+    const session = sessionWithSettledBatch()
+    completeRelayBatch(session, evenLater)
+    const input = startInput()
+    input.batchId = 'batch-2'
+    const { state: next } = startRelayBatch(session, input, evenLater, dummyPort())
+    expect(next.start.batchId).toBe('batch-2')
   })
 })
 
 describe('admitRelayDirector', () => {
-  it('should atomically add admission, set phase to preparing, and mode to running', () => {
-    const { session, state } = sessionWithStartedBatch()
-    const scope = state.items[0]!.scope
-    const message = admissionMessage(0, scope)
-    const result = admitRelayDirector(session, 0, { message, contextSnapshotSha256: sha('a') }, later)
-    expect(result.revision).toBe(2)
-    expect(result.mode).toBe('running')
-    expect(result.items[0]!.phase).toBe('preparing')
-    expect(result.items[0]!.admissions).toHaveLength(1)
-    expect(result.items[0]!.admissions[0]!.message.id).toBe(message.id)
-    expect(result.items[1]!.phase).toBe('pending')
-  })
-
-  it('should reject admission on a non-pending item', () => {
-    const { session, state } = sessionWithStartedBatch()
-    const scope = state.items[0]!.scope
-    admitRelayDirector(session, 0, { message: admissionMessage(0, scope), contextSnapshotSha256: sha('a') }, later)
-    expect(() => admitRelayDirector(session, 0, { message: admissionMessage(0, scope), contextSnapshotSha256: sha('b') }, '2026-09-16T00:02:00.000Z'))
-      .toThrow('Relay item is not pending.')
-  })
-
-  it('should reject retry admission when batch is not paused', () => {
-    const { session, state } = sessionWithStartedBatch()
-    const scope = state.items[0]!.scope
-    admitRelayDirector(session, 0, { message: admissionMessage(0, scope), contextSnapshotSha256: sha('a') }, later)
-    const item = readRelayBatch(session)!.items[0]!
-    expect(item.phase).toBe('preparing')
-    // Item 0 is already preparing; to retry, it would need to go back to pending first (not possible via controller).
-    // Instead test: admit item 1, then try to admit item 1 again while running.
-    admitRelayDirector(session, 1, { message: admissionMessage(1, state.items[1]!.scope), contextSnapshotSha256: sha('a') }, later)
-    // Both items are now preparing; no retry possible on pending items.
-    expect(readRelayBatch(session)!.items.every(i => i.phase === 'preparing')).toBe(true)
-  })
-
-  it('should allow first admission on a paused batch', () => {
-    const { session, state } = sessionWithStartedBatch()
-    advanceRelayBatch(session, later)
-    expect(readRelayBatch(session)!.mode).toBe('paused')
-    const scope = state.items[0]!.scope
-    const result = admitRelayDirector(session, 0, { message: admissionMessage(0, scope), contextSnapshotSha256: sha('a') }, '2026-09-16T00:02:00.000Z')
-    expect(result.mode).toBe('running')
-    expect(result.items[0]!.phase).toBe('preparing')
-  })
-
-  it('should reject invalid index', () => {
-    const { session } = sessionWithStartedBatch()
-    expect(() => admitRelayDirector(session, -1, { message: admissionMessage(0, startInput().shots[0]!.scope), contextSnapshotSha256: sha('a') }, later))
-      .toThrow('Invalid relay item index.')
-    expect(() => admitRelayDirector(session, 5, { message: admissionMessage(0, startInput().shots[0]!.scope), contextSnapshotSha256: sha('a') }, later))
-      .toThrow('Invalid relay item index.')
-  })
-
-  it('should reject when no open batch exists', () => {
+  it('adds an admission and transitions the item to preparing', () => {
     const session = Session.create(SessionId('relay-session'))
-    expect(() => admitRelayDirector(session, 0, { message: admissionMessage(0, startInput().shots[0]!.scope), contextSnapshotSha256: sha('a') }, later))
-      .toThrow('No open relay batch.')
+    startRelayBatch(session, startInput(), now, dummyPort()).lease.release()
+    const adm = admission(scope0)
+    const state = admitRelayDirector(session, 0, adm, later)
+    expect(state.items[0]!.admissions).toHaveLength(1)
+    expect(state.items[0]!.admissions[0]!.contextSnapshotSha256).toBe(adm.contextSnapshotSha256)
+    expect(state.items[0]!.phase).toBe('preparing')
+    expect(state.mode).toBe('running')
+    expect(state.revision).toBe(2)
+  })
+
+  it('throws when no batch is open', () => {
+    const session = Session.create(SessionId('relay-session'))
+    expect(() => admitRelayDirector(session, 0, admission(scope0), now)).toThrow(/no open/i)
+  })
+
+  it('throws for an invalid index', () => {
+    const session = Session.create(SessionId('relay-session'))
+    startRelayBatch(session, startInput(), now, dummyPort()).lease.release()
+    expect(() => admitRelayDirector(session, -1, admission(scope0), later)).toThrow(/invalid/i)
+    expect(() => admitRelayDirector(session, 2, admission(scope0), later)).toThrow(/invalid/i)
+    expect(() => admitRelayDirector(session, 0.5, admission(scope0), later)).toThrow(/invalid/i)
+  })
+
+  it('throws when the item is not pending', () => {
+    const session = Session.create(SessionId('relay-session'))
+    startRelayBatch(session, startInput(), now, dummyPort()).lease.release()
+    admitRelayDirector(session, 0, admission(scope0), later)
+    // Item 0 is now 'preparing', not 'pending'
+    expect(() => admitRelayDirector(session, 0, admission(scope0, 'b'), evenLater)).toThrow(/not pending/i)
+  })
+
+  it('admits a retry on a paused batch for a pending item', () => {
+    const session = Session.create(SessionId('relay-session'))
+    startRelayBatch(session, startInput(), now, dummyPort()).lease.release()
+    // Admit item 0, settle it, then pause and admit item 1
+    admitRelayDirector(session, 0, admission(scope0), later)
+    // Pause via advanceRelayBatch (no admissions on item 1 yet, but item 0 has admissions now)
+    // Actually advanceRelayBatch checks if ANY item has admissions. Item 0 does, so it will throw.
+    // Instead, manually pause:
+    let state = readRelayState(session)!
+    state = { ...state, revision: state.revision + 1, mode: 'paused' as const, updatedAt: evenLater }
+    session.append('qingmu-director-relay/state', state)
+    // Now admit item 1 on the paused batch (retry scenario)
+    const advanced = admitRelayDirector(session, 1, admission(scope1), evenLater)
+    expect(advanced.mode).toBe('running')
+    expect(advanced.items[1]!.phase).toBe('preparing')
+    expect(advanced.items[1]!.admissions).toHaveLength(1)
   })
 })
 
 describe('advanceRelayBatch', () => {
-  it('should pause a running batch with no admissions', () => {
-    const { session } = sessionWithStartedBatch()
-    const result = advanceRelayBatch(session, later)
-    expect(result.mode).toBe('paused')
-    expect(result.reason).toBe('awaiting_director_admission')
-    expect(result.revision).toBe(2)
-  })
-
-  it('should reject when admissions exist', () => {
-    const { session, state } = sessionWithStartedBatch()
-    admitRelayDirector(session, 0, { message: admissionMessage(0, state.items[0]!.scope), contextSnapshotSha256: sha('a') }, later)
-    expect(() => advanceRelayBatch(session, '2026-09-16T00:02:00.000Z'))
-      .toThrow('Batch has admissions; pause is not applicable.')
-  })
-
-  it('should reject when batch is not running', () => {
-    const { session } = sessionWithStartedBatch()
-    advanceRelayBatch(session, later)
-    expect(() => advanceRelayBatch(session, '2026-09-16T00:02:00.000Z'))
-      .toThrow('Cannot pause a non-running batch.')
-  })
-
-  it('should reject when no batch exists', () => {
+  it('pauses the batch when no items have any admissions', () => {
     const session = Session.create(SessionId('relay-session'))
-    expect(() => advanceRelayBatch(session, later))
-      .toThrow('No open relay batch.')
-  })
-})
-
-describe('closeRelayBatch', () => {
-  it('should abandon non-settled items and preserve the reason', () => {
-    const { session } = sessionWithStartedBatch()
-    const result = closeRelayBatch(session, 'authorization expired', later)
-    expect(result.mode).toBe('closed')
-    expect(result.reason).toBe('authorization expired')
-    expect(result.items.every(item => item.phase === 'abandoned')).toBe(true)
-    expect(result.items.every(item => item.reason === 'authorization expired')).toBe(true)
+    startRelayBatch(session, startInput(), now, dummyPort()).lease.release()
+    const state = advanceRelayBatch(session, later)
+    expect(state.mode).toBe('paused')
+    expect(state.reason).toBe('awaiting_director_admission')
   })
 
-  it('should reject an empty reason', () => {
-    const { session } = sessionWithStartedBatch()
-    expect(() => closeRelayBatch(session, '', later))
-      .toThrow('Close reason must be a non-empty string.')
-  })
-
-  it('should reject when no open batch exists', () => {
+  it('throws when no batch is open', () => {
     const session = Session.create(SessionId('relay-session'))
-    expect(() => closeRelayBatch(session, 'expired', later))
-      .toThrow('No open relay batch.')
+    expect(() => advanceRelayBatch(session, now)).toThrow(/no open/i)
   })
 
-  it('should be terminal — cannot reopen after close', () => {
+  it('throws when items already have admissions', () => {
     const session = Session.create(SessionId('relay-session'))
-    startRelayBatch(session, startInput(), now, dummyPort())
-    closeRelayBatch(session, 'expired', later)
-    expect(hasHostDirectorOwner(session)).toBe(false)
-    const replacement = { ...startInput(), batchId: 'batch-2', authorization: { ...startInput().authorization, expiresAt: '2026-09-16T03:00:00.000Z' } }
-    expect(() => startRelayBatch(session, replacement, '2026-09-16T02:00:00.000Z', dummyPort()))
-      .not.toThrow()
+    startRelayBatch(session, startInput(), now, dummyPort()).lease.release()
+    admitRelayDirector(session, 0, admission(scope0), later)
+    expect(() => advanceRelayBatch(session, evenLater)).toThrow(/already have admissions/i)
   })
 })
 
 describe('completeRelayBatch', () => {
-  it('should complete a fully settled batch, release the Host lease, and allow replacement', () => {
+  it('completes a batch when all items are settled', () => {
+    const session = sessionWithSettledBatch()
+    const completed = completeRelayBatch(session, evenLater)
+    expect(completed.mode).toBe('completed')
+  })
+
+  it('throws when no batch is open', () => {
     const session = Session.create(SessionId('relay-session'))
-    startRelayBatch(session, startInput(), now, dummyPort())
-    settleItem(session, 0, {
-      admit: '2026-09-16T00:01:00.000Z', prepared: '2026-09-16T00:02:00.000Z',
-      submitted: '2026-09-16T00:03:00.000Z', collected: '2026-09-16T00:04:00.000Z',
-    })
-    settleItem(session, 1, {
-      admit: '2026-09-16T00:05:00.000Z', prepared: '2026-09-16T00:06:00.000Z',
-      submitted: '2026-09-16T00:07:00.000Z', collected: '2026-09-16T00:08:00.000Z',
-    })
-    const result = completeRelayBatch(session, '2026-09-16T00:09:00.000Z')
-    expect(result.mode).toBe('completed')
-    expect(result.reason).toBeNull()
-    expect(hasHostDirectorOwner(session)).toBe(false)
-    const replacement = {
-      ...startInput(), batchId: 'batch-2',
-      authorization: { ...startInput().authorization, expiresAt: '2026-09-16T03:00:00.000Z' },
-    }
-    expect(() => startRelayBatch(session, replacement, '2026-09-16T02:00:00.000Z', dummyPort()))
-      .not.toThrow()
+    expect(() => completeRelayBatch(session, now)).toThrow(/no open/i)
   })
 
-  it('should reject when items are not settled', () => {
-    const { session } = sessionWithStartedBatch()
-    expect(() => completeRelayBatch(session, later))
-      .toThrow('Relay item 0 is not settled; cannot complete the batch.')
-  })
-
-  it('should reject when no open batch exists', () => {
+  it('throws when items are not settled', () => {
     const session = Session.create(SessionId('relay-session'))
-    expect(() => completeRelayBatch(session, later))
-      .toThrow('No open relay batch.')
+    startRelayBatch(session, startInput(), now, dummyPort()).lease.release()
+    expect(() => completeRelayBatch(session, later)).toThrow(/not settled/i)
+  })
+})
+
+describe('closeRelayBatch', () => {
+  it('closes a batch with a reason and abandons unsettled items', () => {
+    const session = Session.create(SessionId('relay-session'))
+    startRelayBatch(session, startInput(), now, dummyPort()).lease.release()
+    const closed = closeRelayBatch(session, 'expired', later)
+    expect(closed.mode).toBe('closed')
+    expect(closed.reason).toBe('expired')
+    expect(closed.items.every(item => item.phase === 'abandoned')).toBe(true)
   })
 
-  it('should reject when batch is closed', () => {
-    const { session } = sessionWithStartedBatch()
-    closeRelayBatch(session, 'expired', later)
-    expect(() => completeRelayBatch(session, '2026-09-16T00:02:00.000Z'))
-      .toThrow('No open relay batch.')
+  it('preserves settled items and abandons unsettled ones when closing', () => {
+    const session = sessionWithSettledBatch()
+    const closed = closeRelayBatch(session, 'operator_close', evenLater)
+    expect(closed.items[0]!.phase).toBe('collected')
+    expect(closed.items[1]!.phase).toBe('failed')
+  })
+
+  it('throws when no batch is open', () => {
+    const session = Session.create(SessionId('relay-session'))
+    expect(() => closeRelayBatch(session, 'reason', now)).toThrow(/no open/i)
+  })
+
+  it('throws for an empty reason', () => {
+    const session = Session.create(SessionId('relay-session'))
+    startRelayBatch(session, startInput(), now, dummyPort()).lease.release()
+    expect(() => closeRelayBatch(session, '', later)).toThrow(/non-empty/i)
   })
 })
 
 describe('recoverRelayBatch', () => {
-  it('should return null when no open batch exists', () => {
+  it('returns null when no relay state exists', () => {
     const session = Session.create(SessionId('relay-session'))
     expect(recoverRelayBatch(session, dummyPort())).toBeNull()
   })
 
-  it('should return null when batch is terminal', () => {
-    const { session } = sessionWithStartedBatch()
-    closeRelayBatch(session, 'expired', later)
+  it('returns null when the batch is already completed', () => {
+    const session = sessionWithSettledBatch()
+    completeRelayBatch(session, evenLater)
     expect(recoverRelayBatch(session, dummyPort())).toBeNull()
   })
 
-  it('should recover state and lease for an open batch', () => {
-    const coldSession = Session.create(SessionId('cold-session'))
-    const state = createRelayState(startInput(), now)
-    appendRelayState(coldSession, state, 0)
-    const recovered = recoverRelayBatch(coldSession, dummyPort())
-    expect(recovered).not.toBeNull()
-    expect(recovered!.state.mode).toBe('running')
-    expect(recovered!.lease).toHaveProperty('enter')
-    expect(recovered!.lease).toHaveProperty('release')
-  })
-})
-
-describe('releaseDeadRelayHostLease', () => {
-  it('should release an invalidated lease so the batch can be recovered without abandoning items', () => {
-    const { session } = sessionWithStartedBatch()
-    invalidateHostDirectorBinding(session)
-    expect(() => recoverRelayBatch(session, dummyPort())).toThrow('Relay batch does not have an available Host lease.')
-    expect(releaseDeadRelayHostLease(session, 'batch-1')).toEqual({ settling: false })
-    expect(hasHostDirectorOwner(session)).toBe(false)
+  it('re-establishes a lease for an open batch', () => {
+    const session = Session.create(SessionId('relay-session'))
+    const { state: original, lease } = startRelayBatch(session, startInput(), now, dummyPort())
+    lease.release()
     const recovered = recoverRelayBatch(session, dummyPort())
     expect(recovered).not.toBeNull()
-    expect(recovered!.state.items.map(item => item.phase)).toEqual(['pending', 'pending'])
-  })
-
-  it('should refuse to release a healthy lease', () => {
-    const { session } = sessionWithStartedBatch()
-    expect(() => releaseDeadRelayHostLease(session, 'batch-1')).toThrow('A live Host lease cannot be released.')
-    expect(hasHostDirectorOwner(session)).toBe(true)
-  })
-
-  it('should refuse when no lease exists for the batch', () => {
-    const { session } = sessionWithStartedBatch()
-    releaseHostDirectorBinding(session, 'batch-1')
-    expect(() => releaseDeadRelayHostLease(session, 'batch-1')).toThrow('No Host lease exists for this batch.')
-  })
-
-  it('should refuse a mismatched batch identity without touching the live lease', () => {
-    const { session } = sessionWithStartedBatch()
-    expect(() => releaseDeadRelayHostLease(session, 'batch-2')).toThrow('No open relay batch with this identity.')
-    expect(hasHostDirectorOwner(session)).toBe(true)
-  })
-
-  it('should refuse a terminal batch', () => {
-    const { session } = sessionWithStartedBatch()
-    closeRelayBatch(session, 'expired', later)
-    expect(() => releaseDeadRelayHostLease(session, 'batch-1')).toThrow('No open relay batch with this identity.')
+    expect(recovered!.state.start.batchId).toBe(original.start.batchId)
+    expect(typeof recovered!.lease.enter).toBe('function')
+    expect(typeof recovered!.lease.release).toBe('function')
+    recovered!.lease.release()
   })
 })

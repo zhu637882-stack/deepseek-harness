@@ -522,7 +522,7 @@ describe('PromptIrWorkspace vertical slice', () => {
     fireEvent.click(screen.getByRole('button', { name: zh.nativeDraftRead }))
     fireEvent.click(await screen.findByRole('button', { name: zh.nativeDraftAdopt }))
     await screen.findByText(zh.nativeDraftAdopted)
-    expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe(CANDIDATE_EDITABLE.videoGenPrompt)
+    expect(screen.getByLabelText<HTMLTextAreaElement>(zh.directorVideoPrompt).value).toBe(CANDIDATE_EDITABLE.videoGenPrompt)
     expect(readNativeDraftProposal).toHaveBeenCalledTimes(2)
     expect(spies.commitPromptIrEdit).not.toHaveBeenCalled()
     expect(spies.proposePromptIr).not.toHaveBeenCalled()
@@ -537,7 +537,7 @@ describe('PromptIrWorkspace vertical slice', () => {
     expect(spies.commitPromptIrEdit).toHaveBeenCalledTimes(1)
     expect(spies.queueProductionTake).not.toHaveBeenCalled()
     expect(spies.selectPromptIr).not.toHaveBeenCalled()
-    expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe(CANDIDATE_EDITABLE.videoGenPrompt)
+    expect(screen.getByLabelText<HTMLTextAreaElement>(zh.directorVideoPrompt).value).toBe(CANDIDATE_EDITABLE.videoGenPrompt)
   })
   it('shows one Ready-bound first-frame quote without offering submission', async () => {
     const { port, spies } = createPort()
@@ -633,7 +633,6 @@ describe('PromptIrWorkspace vertical slice', () => {
       shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={readPort} t={t}
       onCommitted={vi.fn(async () => {})} presentation="director" />)
     await screen.findByText(zh.directorStaleDraft)
-    // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves Testing Library queries as HTMLElement
     expect((screen.getByRole('button', { name: zh.promptIrCheckMethod }) as HTMLButtonElement).disabled).toBe(true)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     try { fireEvent.click(screen.getByRole('button', { name: zh.directorRebase })) }
@@ -659,16 +658,13 @@ describe('PromptIrWorkspace vertical slice', () => {
     await screen.findByText(zh.directorUnsaved)
     view.unmount()
     const restored = render(<PromptIrWorkspace {...props} />)
-    // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves Testing Library queries as HTMLElement
     await waitFor(() => { expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe('未保存的完整提示词') })
     expect(spies.commitPromptIrEdit).not.toHaveBeenCalled()
     restored.unmount()
     spies.promptIr.mockResolvedValueOnce({ ...BASE_READ, baseSnapshotSha256: 'f'.repeat(64) })
     render(<PromptIrWorkspace {...props} />)
     await screen.findByText(zh.directorStaleDraft)
-    // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves Testing Library queries as HTMLElement
     expect((screen.getByRole('button', { name: zh.promptIrCheckMethod }) as HTMLButtonElement).disabled).toBe(true)
-    // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves Testing Library queries as HTMLElement
     expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe('未保存的完整提示词')
   })
 
@@ -683,7 +679,6 @@ describe('PromptIrWorkspace vertical slice', () => {
       shotItems={frame('Ready')} selectedShotId={FRAME_ID} onSelectShotId={vi.fn()} port={readPort} t={t}
       onCommitted={vi.fn(async () => {})} presentation="director" />)
     await waitFor(() => {
-      // eslint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc resolves Testing Library queries as HTMLElement
       expect((screen.getByLabelText(zh.directorVideoPrompt) as HTMLTextAreaElement).value).toBe(CANDIDATE_EDITABLE.videoGenPrompt)
     })
     expect(screen.queryByRole('button', { name: zh.promptIrSelect })).toBeNull()
@@ -908,7 +903,7 @@ describe('PromptIrWorkspace vertical slice', () => {
     for (const forbidden of ['ownerId', 'ready', 'selected', 'approved', 'force', 'provider', 'model', 'route']) {
       expect(browserIntent).not.toHaveProperty(forbidden)
     }
-    expect((screen.getByRole('button', { name: zh.productionTakeThree }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: zh.productionTakeThree }).disabled).toBe(true)
     fireEvent.click(screen.getByRole('checkbox', { name: '我确认本次镜头视频生成最高费用为 0.3000 CNY。' }))
     fireEvent.click(screen.getByRole('button', { name: zh.productionTakeTwo }))
     await screen.findByText('2 / 2')
@@ -949,9 +944,9 @@ describe('PromptIrWorkspace vertical slice', () => {
     const recovered = createPort()
     view.rerender(<PromptIrWorkspace {...props} presentation="shooting" port={recovered.port} />)
     fireEvent.click(await screen.findByRole('button', { name: '恢复同一任务' }))
-    await waitFor(() => expect(recovered.spies.queueProductionTake).toHaveBeenCalledTimes(1))
+    await waitFor(() => { expect(recovered.spies.queueProductionTake).toHaveBeenCalledTimes(1) })
     expect(recovered.spies.queueProductionTake.mock.calls[0]![0]).toEqual(original)
-    await waitFor(() => expect(screen.queryByRole('button', { name: '恢复同一任务' })).toBeNull())
+    await waitFor(() => { expect(screen.queryByRole('button', { name: '恢复同一任务' })).toBeNull() })
   })
 
   it('native shooting rework uses Writer next ordinal, not initial or a cached receipt', async () => {
@@ -959,12 +954,12 @@ describe('PromptIrWorkspace vertical slice', () => {
     render(<PromptIrWorkspace projectId={PROJECT_ID} episodeId={EPISODE_ID}
       shotItems={frame('Ready')} storyboardRevisionId={STORYBOARD_REVISION_ID} selectedShotId={FRAME_ID}
       onSelectShotId={vi.fn()} port={port} t={t} onCommitted={async () => {}} presentation="shooting" />)
-    await waitFor(() => expect(spies.promptIr).toHaveBeenCalled())
+    await waitFor(() => { expect(spies.promptIr).toHaveBeenCalled() })
     const button = await screen.findByRole('button', { name: '重新生成视频' })
     fireEvent.click(button); fireEvent.click(button)
-    await waitFor(() => expect(spies.queueProductionTake).toHaveBeenCalledTimes(1))
+    await waitFor(() => { expect(spies.queueProductionTake).toHaveBeenCalledTimes(1) })
     expect(spies.queueProductionTake.mock.calls[0]![0]).toMatchObject({ takeOrdinal: 2, takeKind: 'targeted_rework' })
-    await waitFor(() => expect(screen.queryByRole('button', { name: '重新生成视频' })).toBeNull())
+    await waitFor(() => { expect(screen.queryByRole('button', { name: '重新生成视频' })).toBeNull() })
   })
 
   it('keeps an unknown-result marker across refresh and recovers with the original intent', async () => {

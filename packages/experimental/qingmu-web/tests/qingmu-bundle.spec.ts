@@ -59,14 +59,23 @@ describe('Qingmu Web distribution composition', () => {
         name: '@deepseek-ai/dsh-experimental-client-ui-qingmu-cockpit',
       }),
     ])
+    expect(entries.filter(entry => entry.id === 'qingmu-project-context')).toEqual([
+      expect.objectContaining({
+        id: 'qingmu-project-context',
+        name: '@deepseek-ai/dsh-experimental-qingmu-project-context',
+      }),
+    ])
 
     const readAdapterIndex = entries.findIndex(entry => entry.id === 'qingmu-yimeng-read-adapter')
     const methodAdapterIndex = entries.findIndex(entry => entry.id === 'qingmu-imago-method-adapter')
     const commandAdapterIndex = entries.findIndex(entry => entry.id === 'qingmu-yimeng-command-adapter')
     const cockpitIndex = entries.findIndex(entry => entry.id === 'ui-qingmu-cockpit')
+    const bridgeIndex = entries.findIndex(entry => entry.id === 'qingmu-director-context-bridge')
+    const projectContextIndex = entries.findIndex(entry => entry.id === 'qingmu-project-context')
     expect(readAdapterIndex).toBeGreaterThanOrEqual(0)
     expect(methodAdapterIndex).toBeGreaterThan(readAdapterIndex)
     expect(commandAdapterIndex).toBeGreaterThan(methodAdapterIndex)
     expect(cockpitIndex).toBeGreaterThan(commandAdapterIndex)
+    expect(projectContextIndex).toBeGreaterThan(bridgeIndex)
   })
 })

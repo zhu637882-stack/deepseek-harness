@@ -9,6 +9,7 @@ import type { PromptIrWorkspaceProps } from './PromptIrWorkspace.tsx'
 import { NativeDirectorSuggestion } from './NativeDirectorDraft.tsx'
 import { useDirectorConnection } from './native-director-session.ts'
 import type { YimengPromptIrEditableProjection } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
+import type { NativeFirstDraftProposal } from '@deepseek-ai/dsh-experimental-qingmu-director-context-bridge/types'
 import css from './QingmuCockpit.module.css'
 import directorCss from './DirectorWorkspace.module.css'
 
@@ -166,6 +167,10 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function isAborted(controller: AbortController): boolean {
+  return controller.signal.aborted
+}
+
 function assertState(result: YimengPromptIrBootstrapResponse, frame: BootstrapFrame): void {
   const context = recordOf(result.context) ?? {}
   const storyboard = recordOf(context.storyboard) ?? {}
@@ -309,7 +314,7 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
     dirtyCallback.current?.(unsaved)
     const beforeUnload = (event: BeforeUnloadEvent): void => {
       if (unsaved || operation === 'committing' || operation === 'selecting') {
-        event.preventDefault(); event.returnValue = ''
+        event.preventDefault()
       }
     }
     window.addEventListener('beforeunload', beforeUnload)
@@ -420,12 +425,12 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
         methodProjection: prepared.projection,
         methodAttestation: prepared.methodAttestation,
       }, controller.signal)
-      if (controller.signal.aborted) return
+      if (isAborted(controller)) return
       assertDraftReceipt(result, marker)
       await recoverDraft(marker)
     } catch (cause) {
-      if (!controller.signal.aborted) setError(`${messageOf(cause)} · 结果未知时请使用“恢复原 Draft 回执”，不要新建。`)
-    } finally { if (!controller.signal.aborted) setOperation('idle') }
+      if (!isAborted(controller)) setError(`${messageOf(cause)} · 结果未知时请使用“恢复原 Draft 回执”，不要新建。`)
+    } finally { if (!isAborted(controller)) setOperation('idle') }
   }
 
   const select = async (markerOverride?: SelectionRecoveryMarker): Promise<void> => {
@@ -461,7 +466,7 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
           draft.promptIrId, draft.promptIrVersion, draft.promptIrContentSha256,
           methodSha256, freshness.projectionSha256,
         ])
-        if (controller.signal.aborted) return
+        if (isAborted(controller)) return
         marker = {
           schema: 'qingmu.prompt-ir-bootstrap-selection-recovery.v1',
           projectId: frame.projectId, episodeId: frame.episodeId,
@@ -551,9 +556,11 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
         onClick={() => { void compile() }}>{operation === 'compiling' ? '正在核验方法…' : fields === undefined ? '生成首个 Draft 预览' : '检查并预览首稿'}</button>
       <span>不会启动生成、选择参考或代替人工决定。</span></div>}
     {state !== undefined && state.draft === null && state.ready === null && props.nativeDirector &&
-      <NativeDirectorSuggestion context={props.nativeDirector} disabled={busy || staleEditor || draftMarker !== undefined}
+      <NativeDirectorSuggestion<NativeFirstDraftProposal> context={props.nativeDirector}
+        disabled={busy || staleEditor || draftMarker !== undefined}
         hint="在青木导演会话中要求起草本镜首稿。助手读取上游与 IMAGO 方法后提出完整五字段建议；采用后可手改、检查和保存，不会自动生成或签收。"
-        sourceKey={editorKey} t={props.t} readProposal={props.nativeDirector.bridge.readNativeFirstDraftProposal}
+        sourceKey={editorKey} t={props.t}
+        readProposal={props.nativeDirector.bridge.readNativeFirstDraftProposal?.bind(props.nativeDirector.bridge)}
         renderProposal={proposal => <><p>{proposal.reason}</p>{EDITABLE_FIELDS.map(field =>
           <details key={field}><summary>{field}</summary>
             <pre className={directorCss.promptText}>{proposal.editableProjection[field]}</pre></details>)}</>}
@@ -565,7 +572,7 @@ export function PromptIrBootstrapWorkspace(props: PromptIrWorkspaceProps) {
             || (editor?.key === editorKey && editor.dirty)) throw new Error('当前上游或手工草稿已变化，不能覆盖。')
           setEditor({ key: editorKey, frameKey, fields: proposal.editableProjection, dirty: false }); setMethod(undefined)
         }} />}
-    {staleEditor && editor && <section aria-label="旧首稿保留" role="alert">
+    {staleEditor && <section aria-label="旧首稿保留" role="alert">
       <p>上游内容或当前提示词版本已变化；旧首稿保留供核对，不会覆盖现有版本。请先复制需要的文字，再明确丢弃旧稿。</p>
       {EDITABLE_FIELDS.map(field => <details key={field}><summary>{field}</summary><pre>{editor.fields[field]}</pre></details>)}
       <button type="button" disabled={busy} onClick={() => { setEditor(undefined); setMethod(undefined) }}>丢弃这份本地旧稿</button>

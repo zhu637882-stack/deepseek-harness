@@ -215,7 +215,7 @@ export function AppFrame({
       } }, { fallback: standardFrame })}
     </div>
     {toolsOpen && <section className={css.tools} aria-label="系统设置与会话">
-      <header><strong>系统设置与会话</strong><button ref={toolsRef} type="button" onClick={() => setToolsOpen(false)}>返回创作</button></header>{standardFrame}
+      <header><strong>系统设置与会话</strong><button ref={toolsRef} type="button" onClick={() => { setToolsOpen(false) }}>返回创作</button></header>{standardFrame}
     </section>}
   </>
 }

@@ -5,14 +5,10 @@ import type {
   DirectorProposalFreshnessRequest,
   DirectorReplayProposal,
 } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-command-adapter/types'
-import type { JsonValue, Session, UserMessage } from '@deepseek-ai/dsh-session'
+import type { JsonValue, Session } from '@deepseek-ai/dsh-session'
 import type { ImagoDirectorInstructionsResponse } from '@deepseek-ai/dsh-experimental-qingmu-imago-method-adapter/types'
 import type { YimengPromptIrResponse, YimengPromptIrBootstrapResponse } from '@deepseek-ai/dsh-experimental-qingmu-yimeng-read-adapter/types'
-import type { RelayStart, RelayState } from './relay-state.ts'
-import type { RelayDriveReport } from './relay-runner.ts'
-
-export type { RelayStart, RelayState } from './relay-state.ts'
-export type { RelayDriveReport, RelayRunnerPorts } from './relay-runner.ts'
+import type { RelayState } from './relay-state.ts'
 
 /** Full current upstream and C5 read before authoring the first prompt; no invented Ready baseline. */
 export interface NativeFirstDraftInput {
@@ -254,28 +250,27 @@ export interface DirectorContextClientPort {
     readonly state: DirectorContextBindingState
     readonly manualWorkAllowed: true
   }>
-  /** Read the latest relay ledger; null means no batch has been recorded. Pure read. */
-  readRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<RelayState | null>
-  /** Start a relay batch under an explicit operator authorization; claims the Host lease. */
-  startRelayBatch?(sessionId: string, input: RelayStart, signal?: AbortSignal): Promise<{ readonly state: RelayState }>
-  /** Admit one director message and atomically move the item to preparing; retry requires a paused batch. */
+  /** Read the latest relay ledger without side effects. */
+  readRelayState?(sessionId: string, signal?: AbortSignal): Promise<RelayState | null>
+  /** Start a new relay batch, claiming the Host lease. */
+  startRelayBatch?(sessionId: string, input: unknown, signal?: AbortSignal): Promise<{ readonly state: RelayState }>
+  /** Admit one director request to a pending item. */
   admitRelayDirector?(
     sessionId: string, index: number,
-    admission: { message: UserMessage; contextSnapshotSha256: string },
+    admission: { message: import('@deepseek-ai/dsh-session').UserMessage; contextSnapshotSha256: string },
     signal?: AbortSignal,
   ): Promise<{ readonly state: RelayState }>
-  /** Pause a running batch that has no admissions yet; the next admission resumes it. */
+  /** Pause a batch when no director admissions exist yet. */
   advanceRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<{ readonly state: RelayState }>
-  /** Complete a batch whose items all carry terminal evidence; terminal and releases the Host lease. */
+  /** Complete a batch where all items have terminal evidence. */
   completeRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<{ readonly state: RelayState }>
-  /** Close an uncontinuable batch with a reason; terminal and releases the Host lease. */
+  /** Close a batch that cannot continue, abandoning non-settled items. */
   closeRelayBatch?(sessionId: string, reason: string, signal?: AbortSignal): Promise<{ readonly state: RelayState }>
-  /** Re-claim the Host lease for an open batch after a cold restart; recovered is false when nothing is open. */
-  recoverRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<{ readonly state: RelayState | null; readonly recovered: boolean }>
-  /** Release a dead (invalidated) Host lease of the exact open batch so it can be recovered; a live lease always rejects. */
-  releaseRelayHostLease?(sessionId: string, batchId: string, signal?: AbortSignal): Promise<{ readonly settling: boolean }>
-  /** Ask the Host to advance an open batch: admit, drive guarded turns, and dispatch only reserved intents. */
-  driveRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<RelayDriveReport>
+  /** Cold-recover an open relay batch by re-claiming the Host lease. */
+  recoverRelayBatch?(sessionId: string, signal?: AbortSignal): Promise<{
+    readonly state: RelayState | null
+    readonly recovered: boolean
+  }>
 }
 
 declare module '@deepseek-ai/dsh-session/types' {

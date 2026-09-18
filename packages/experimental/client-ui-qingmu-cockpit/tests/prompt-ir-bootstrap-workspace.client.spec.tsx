@@ -243,7 +243,7 @@ describe('first PromptIR bootstrap workspace', () => {
     connection.publish(false)
     await screen.findByText('连接已断开；未保存文字保留，恢复连接后重新核对上游。')
     connection.publish(true)
-    expect((await screen.findByRole('textbox', { name: '首帧画面' }) as HTMLTextAreaElement).value).toBe('保留人工首稿')
+    expect((await screen.findByRole<HTMLTextAreaElement>('textbox', { name: '首帧画面' })).value).toBe('保留人工首稿')
     expect(harness.spies.bootstrapPromptIr).not.toHaveBeenCalled()
   })
 
@@ -257,12 +257,12 @@ describe('first PromptIR bootstrap workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '刷新' }))
     await screen.findByRole('alert', { name: '旧首稿保留' })
     expect(screen.getByText('旧稿需保留')).toBeTruthy()
-    expect((screen.getByRole('button', { name: '生成首个 Draft 预览' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '生成首个 Draft 预览' }).disabled).toBe(true)
     expect(onUnsavedChange).toHaveBeenLastCalledWith(true)
     expect(harness.spies.promptIrBootstrapMethod).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: '丢弃这份本地旧稿' }))
     expect(onUnsavedChange).toHaveBeenLastCalledWith(false)
-    expect((screen.getByRole('button', { name: '生成首个 Draft 预览' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '生成首个 Draft 预览' }).disabled).toBe(false)
   })
   it.each(['draft', 'ready'] as const)('preserves different local text when another session saves %s', async (status) => {
     const harness = port()

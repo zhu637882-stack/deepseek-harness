@@ -113,7 +113,7 @@ export function NativeDirectorDraft(props: {
   readonly t: (key: QingmuCockpitKey) => string
 }) {
   const { t } = props
-  return <NativeDirectorSuggestion {...props} readProposal={props.context.bridge.readNativeDraftProposal}
+  return <NativeDirectorSuggestion {...props} readProposal={props.context.bridge.readNativeDraftProposal?.bind(props.context.bridge)}
     renderProposal={proposal => <>
       <p>{proposal.reason}</p><p>{t('nativeDraftField')}: {proposal.field}</p>
       <details><summary>{t('nativeDraftBefore')}</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{proposal.before}</pre></details>

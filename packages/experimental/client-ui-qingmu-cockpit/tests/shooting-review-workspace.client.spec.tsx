@@ -101,7 +101,7 @@ describe('ShootingReviewWorkspace', () => {
     const view = render(<AutomaticFrameRequirementsEditor {...props} />)
     await screen.findByDisplayValue('双手握盘')
     fireEvent.change(screen.getByRole('textbox',{ name:'动作' }),{ target:{ value:'缓慢抬头' } })
-    expect((screen.getByRole('textbox',{ name:'机位' }) as HTMLInputElement).value).toBe('平视')
+    expect(screen.getByRole<HTMLInputElement>('textbox',{ name:'机位' }).value).toBe('平视')
     fireEvent.change(screen.getByRole('textbox',{ name:'机位' }),{ target:{ value:'驾驶员视点' } })
     view.unmount(); render(<AutomaticFrameRequirementsEditor {...props} />)
     expect(await screen.findByDisplayValue('缓慢抬头')).toBeTruthy()
@@ -237,7 +237,7 @@ describe('ShootingReviewWorkspace', () => {
 
   it('keeps an empty real candidate list neutral instead of calling it failed', async () => {
     render(<ShootingReviewWorkspace projectName="落日公路" episodeName="第 1 集" projectId="project_cd5eabc7582b" episodeId="episode_cd4ffe357df9" projection={projection} selectedShotId="frame_34b3741b1f0a" onSelectShotId={vi.fn()} onNavigate={vi.fn()} directorAssistant={null} t={key => key} port={{ takePreview: vi.fn(), selectTakeVersion: vi.fn(), recoverTakeVersionSelection: vi.fn(), takeVersions: vi.fn(async () => ({ subject: { projectId: 'project_cd5eabc7582b', episodeId: 'episode_cd4ffe357df9', frameId: 'frame_34b3741b1f0a', selectedTakeId: null, versions: [] }, capabilities: { canSelect: false }, stackSnapshotSha256: 'a'.repeat(64) })) } as never} />)
-    await waitFor(() => expect(document.querySelector('[data-state="pending-review"]')).toBeTruthy())
+    await waitFor(() => { expect(document.querySelector('[data-state="pending-review"]')).toBeTruthy() })
   })
 
   it('shows an imported local video in the existing candidate rail but never offers it for adoption', async () => {

@@ -4,17 +4,22 @@ import type { NativeDialogueExecution, NativeDirectorPromptTarget } from '@deeps
 import { useDirectorConnection, type NativeDirectorSessionPort } from './native-director-session.ts'
 
 const absent = { subscribe: () => () => {}, getSnapshot: () => undefined }
+function shotsValid(value: unknown): boolean {
+  return Array.isArray(value) && value.every(shot => typeof shot === 'object' && shot !== null
+    && typeof (shot as Record<string, unknown>).shotId === 'string'
+    && Number.isFinite((shot as Record<string, unknown>).frameNo))
+}
 function execution(value: unknown): NativeDialogueExecution | undefined {
   if (!value || typeof value !== 'object') return
-  const state = value as NativeDialogueExecution
-  if (!state.scope || !['projectId', 'episodeId', 'sceneId', 'shotId'].every(key =>
-    typeof state.scope[key as keyof typeof state.scope] === 'string')
+  const state = value as Record<string, unknown>
+  const scope = state.scope
+  if (typeof scope !== 'object' || scope === null
+    || !['projectId', 'episodeId', 'sceneId', 'shotId'].every(key => typeof (scope as Record<string, unknown>)[key] === 'string')
     || typeof state.before !== 'string' || typeof state.after !== 'string'
-    || !['prepared', 'saving', 'saved', 'uncertain', 'input_prepared'].includes(state.status)
+    || typeof state.status !== 'string' || !['prepared', 'saving', 'saved', 'uncertain', 'input_prepared'].includes(state.status)
     || !(state.commandReceiptId === null || typeof state.commandReceiptId === 'string')
-    || ![state.affectedShots, state.unchangedShots].every(shots => Array.isArray(shots)
-      && shots.every(shot => shot && typeof shot.shotId === 'string' && Number.isFinite(shot.frameNo)))) return
-  return state
+    || !shotsValid(state.affectedShots) || !shotsValid(state.unchangedShots)) return
+  return state as unknown as NativeDialogueExecution
 }
 
 /** Read a projection from the existing session stream, never a polling or command loop. */

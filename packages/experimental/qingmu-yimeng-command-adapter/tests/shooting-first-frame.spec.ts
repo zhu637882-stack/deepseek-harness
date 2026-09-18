@@ -13,6 +13,13 @@ async function host(upstream: typeof fetch, readToken: () => string | undefined 
   const address=server.address();if(!address || typeof address==='string') throw Error('missing address')
   return `http://127.0.0.1:${address.port}`
 }
+const requestUrl = (input: string | URL | Request): string =>
+  typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+
+function requestJsonBody(init: RequestInit | undefined): unknown {
+  if (typeof init?.body !== 'string') throw new Error('expected a JSON string request body')
+  return JSON.parse(init.body) as unknown
+}
 const body={ project_id:'p',episode_id:'e',frame_ids:['f'],candidate_request_id:'r',shooting_preflight_id:'a'.repeat(64),shooting_payload_hash:'b'.repeat(64) }
 it.each([
   ['preview', 'POST', { project_id:'p', episode_id:'e', frame_ids:['f'] }],
@@ -109,8 +116,8 @@ it('confirms only one explicit SHA-bound human cookie action and does not submit
   const payload={ project_id:'p',episode_id:'e',frame_ids:['f'],expected_frame_digest:'a'.repeat(64),idempotency_key:'review-one' }
   const response=await fetch(`${base}/api/qingmu/shooting-first-frame/confirm`,{ method:'POST',headers:{ origin:base,cookie:'jason_token=test' },body:JSON.stringify(payload) })
   expect(response.status).toBe(200);expect(upstream).toHaveBeenCalledTimes(1)
-  expect(String(upstream.mock.calls[0]![0])).toBe('http://127.0.0.1:8115/api/episodes/e/storyboard-frames/f/human-review?single_frame=true')
-  expect(JSON.parse(String(upstream.mock.calls[0]![1]?.body))).toEqual({ expected_frame_digest:'a'.repeat(64),idempotency_key:'review-one',decision:'accepted' })
+  expect(requestUrl(upstream.mock.calls[0]![0])).toBe('http://127.0.0.1:8115/api/episodes/e/storyboard-frames/f/human-review?single_frame=true')
+  expect(requestJsonBody(upstream.mock.calls[0]![1])).toEqual({ expected_frame_digest:'a'.repeat(64),idempotency_key:'review-one',decision:'accepted' })
   for(const changed of [{ ...payload,frame_ids:['f','other'] },{ ...payload,authenticated_reviewer_user_id:'forged' },{ ...payload,expected_frame_digest:'bad' }]) {
     await fetch(`${base}/api/qingmu/shooting-first-frame/confirm`,{ method:'POST',headers:{ origin:base,cookie:'jason_token=test' },body:JSON.stringify(changed) })
   }
@@ -131,12 +138,12 @@ it('transports video recovery as GET and explicit resume as one exact-task POST'
   const prefix=`${base}/api/qingmu/shooting-first-frame`
   await fetch(`${prefix}/video-state?project_id=p&episode_id=e&scene_id=s&frame_id=f`,{ headers:{ cookie:'jason_token=test' } })
   expect(upstream.mock.calls[0]![1]?.method).toBe('GET')
-  expect(String(upstream.mock.calls[0]![0])).toBe('http://127.0.0.1:8115/api/qingmu/projects/p/episodes/e/scenes/s/shots/f/production-takes/execution')
+  expect(requestUrl(upstream.mock.calls[0]![0])).toBe('http://127.0.0.1:8115/api/qingmu/projects/p/episodes/e/scenes/s/shots/f/production-takes/execution')
   const payload={ project_id:'p',episode_id:'e',scene_id:'s',frame_ids:['f'],task_id:'original' }
   const headers={ origin:base,cookie:'jason_token=test' }
   await fetch(`${prefix}/video-resume`,{ method:'POST',headers,body:JSON.stringify(payload) })
   expect(upstream).toHaveBeenCalledTimes(2)
-  expect(JSON.parse(String(upstream.mock.calls[1]![1]?.body))).toEqual({ taskId:'original' })
+  expect(requestJsonBody(upstream.mock.calls[1]![1])).toEqual({ taskId:'original' })
   for (const changed of [{ ...payload,force:true },{ ...payload,frame_ids:['f','other'] },{ ...payload,scene_id:'../foreign' }]) {
     await fetch(`${prefix}/video-resume`,{ method:'POST',headers,body:JSON.stringify(changed) })
   }
@@ -149,8 +156,8 @@ it('passes a rework predecessor only to preview, without submitting a new paid t
   const base=await host(upstream)
   const response=await fetch(`${base}/api/qingmu/shooting-first-frame/preview`,{ method:'POST',headers:{ origin:base,cookie:'jason_token=test' },body:JSON.stringify({ project_id:'p',episode_id:'e',frame_ids:['f'],candidate_request_id:'shooting-old' }) })
   expect(response.status).toBe(200)
-  expect(String(upstream.mock.calls[0]![0])).toContain('/shooting-preview')
-  expect(JSON.parse(String(upstream.mock.calls[0]![1]?.body)).candidate_request_id).toBe('shooting-old')
+  expect(requestUrl(upstream.mock.calls[0]![0])).toContain('/shooting-preview')
+  expect((requestJsonBody(upstream.mock.calls[0]![1]) as Record<string, unknown>).candidate_request_id).toBe('shooting-old')
   expect(upstream).toHaveBeenCalledTimes(1)
 })
 

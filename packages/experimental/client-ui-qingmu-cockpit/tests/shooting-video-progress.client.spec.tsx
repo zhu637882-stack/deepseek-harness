@@ -3,6 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, expect, it, vi } from 'vitest'
 import { ShootingVideoProgress } from '../src/client/ShootingVideoProgress.tsx'
 const scope = { projectId:'p',episodeId:'e',sceneId:'s',frameId:'f' }
+function jsonBody(init: RequestInit | undefined): Record<string, unknown> {
+  const body = init?.body
+  if (typeof body !== 'string') throw new Error('expected a JSON string request body')
+  return JSON.parse(body) as Record<string, unknown>
+}
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 it('reads current take ordinal from Writer instead of treating a historical receipt as the next attempt', async () => {
   const state = { ...scope,taskId:'original',kernelStatus:'Succeeded',takeCount:1,nextTakeOrdinal:2 }
@@ -10,7 +15,7 @@ it('reads current take ordinal from Writer instead of treating a historical rece
   vi.stubGlobal('fetch',fetcher)
   const onState = vi.fn(); const onCommitted = vi.fn(async () => {})
   render(<ShootingVideoProgress scope={scope} onState={onState} onCommitted={onCommitted} />)
-  await waitFor(() => expect(onState).toHaveBeenCalledWith(state))
+  await waitFor(() => { expect(onState).toHaveBeenCalledWith(state) })
   expect(onCommitted).toHaveBeenCalledTimes(1)
   expect(screen.queryByRole('button',{ name:'继续原视频任务' })).toBeNull()
 })
@@ -19,7 +24,7 @@ it('refresh only reads; an explicit resume references the same task, never the p
   const fetcher = vi.fn(async (path:string, init?:RequestInit) => {
     if (init?.method === 'POST') {
       expect(path.endsWith('video-resume')).toBe(true)
-      expect(JSON.parse(String(init.body)).task_id).toBe('original')
+      expect(jsonBody(init).task_id).toBe('original')
     }
     return { ok:true,json:async () => ({ ...state,execution:{ activated:true } }) }
   })
@@ -31,5 +36,5 @@ it('refresh only reads; an explicit resume references the same task, never the p
   const button = await screen.findByRole('button',{ name:'继续原视频任务' })
   expect(fetcher.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true)
   fireEvent.click(button); fireEvent.click(button)
-  await waitFor(() => expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1))
+  await waitFor(() => { expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1) })
 })

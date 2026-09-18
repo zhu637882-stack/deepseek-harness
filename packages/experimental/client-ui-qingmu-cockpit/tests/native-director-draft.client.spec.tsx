@@ -39,7 +39,7 @@ it('removes pre-disconnect candidates without touching the editable draft and re
   await screen.findByRole('button', { name: zh.nativeDraftAdopt })
   act(() => { transport.publish(false) })
   expect(screen.queryByRole('button', { name: zh.nativeDraftAdopt })).toBeNull()
-  expect((screen.getByRole('button', { name: zh.nativeDraftRead }) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: zh.nativeDraftRead }).disabled).toBe(true)
   act(() => { transport.publish(true) })
   expect(screen.queryByRole('button', { name: zh.nativeDraftAdopt })).toBeNull()
   expect(app.read).toHaveBeenCalledTimes(1); expect(app.onAdopt).not.toHaveBeenCalled()

@@ -121,10 +121,10 @@ const directorBody = (payload: Readonly<Record<string, unknown>>, provider: stri
   const prompt = (message as Record<string, unknown>).content as string
   const promptUtf8Bytes = Buffer.byteLength(prompt)
   if (promptUtf8Bytes === 0
-    || promptUtf8Bytes > Number(request.estimated_input_tokens)) {
+    || promptUtf8Bytes > request.estimated_input_tokens) {
     throw new Error('director DSh prompt invalid')
   }
-  return { prompt, maxTokens: Number(request.max_completion_tokens) }
+  return { prompt, maxTokens: request.max_completion_tokens }
 }
 
 const productionBaseUrl = (value: string): string => {

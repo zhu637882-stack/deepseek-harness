@@ -3,17 +3,12 @@
  */
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
-import { claimHostDirectorBinding, hasHostDirectorOwner, hostDirectorLeaseHealth, releaseHostDirectorBinding } from './bridge.ts'
+import { claimHostDirectorBinding } from './bridge.ts'
 import {
-  appendRelayState, createRelayState, isSettled, readRelayState, relayBatchIsOpen,
+  appendRelayState, createRelayState, readRelayState, relayBatchIsOpen,
   type RelayState,
 } from './relay-state.ts'
 import type { DirectorContextEntryResult, DirectorContextReadPort, DirectorObjectScope } from './types.ts'
-
-type HostLease = {
-  enter(scope: DirectorObjectScope, signal?: AbortSignal): Promise<DirectorContextEntryResult>
-  release(): void
-}
 
 /** Read the current relay state projection for browser consumption.
  * Pure read; no side effects.
@@ -37,22 +32,25 @@ export function startRelayBatch(
   input: unknown,
   now: string,
   port: DirectorContextReadPort,
-): { state: RelayState; lease: HostLease } {
+): {
+  state: RelayState
+  lease: { enter(scope: DirectorObjectScope, signal?: AbortSignal): Promise<DirectorContextEntryResult>; release(): void }
+} {
   const current = readRelayState(session)
   if (current && relayBatchIsOpen(current)) {
     throw new Error('An open relay batch already exists.')
   }
   const state = createRelayState(input, now)
-  const expectedRevision = current ? current.revision : 0
   const adjusted = current ? { ...state, revision: current.revision + 1 } : state
-  const saved = appendRelayState(session, adjusted, expectedRevision)
+  const saved = appendRelayState(session, adjusted, current ? current.revision : 0)
   const lease = claimHostDirectorBinding(session, saved.start.batchId, port)
   return { state: saved, lease }
 }
 
-/** Admit one director request and atomically transition the item to 'preparing' under a running batch.
- * appendRelayState requires that adding an admission also sets phase to 'preparing' and mode to 'running'.
- * First admission requires the batch to be running or paused; retry admission requires it to be paused.
+/** Admit one director request to the item and transition it to preparing.
+ * Adds the admission to the item's admissions array, transitions the item
+ * from 'pending' to 'preparing', and ensures the batch mode is 'running'.
+ * For a retry admission on a paused batch, the mode transitions to 'running'.
  * @param session Session that owns the batch ledger.
  * @param index Ordered shot index of the item to admit.
  * @param admission The director message and context snapshot SHA.
@@ -69,39 +67,28 @@ export function admitRelayDirector(
   if (!current || !relayBatchIsOpen(current)) throw new Error('No open relay batch.')
   if (!Number.isSafeInteger(index) || index < 0 || index >= current.items.length) throw new Error('Invalid relay item index.')
   const item = current.items[index]
-  if (!item) throw new Error('Invalid relay item index.')
+  if (!item) throw new Error('Relay item not found.')
   if (item.phase !== 'pending') throw new Error('Relay item is not pending.')
-  if (item.admissions.length > 0 && current.mode !== 'paused') {
-    throw new Error('Retry admission requires a paused batch.')
-  }
-  if (item.admissions.length === 0 && current.mode !== 'running' && current.mode !== 'paused') {
-    throw new Error('First admission requires a running or paused batch.')
-  }
+  const isRetry = item.admissions.length > 0
+  if (isRetry && current.mode !== 'paused') throw new Error('Relay admission retry requires a paused batch.')
   const next: RelayState = {
     ...current,
     revision: current.revision + 1,
     updatedAt: now,
     mode: 'running',
     items: current.items.map((item, offset) => offset === index
-      ? {
-        ...item,
-        phase: 'preparing' as const,
-        admissions: [...item.admissions, {
-          message: admission.message,
-          contextSnapshotSha256: admission.contextSnapshotSha256,
-          admittedAt: now,
-        }],
-      }
+      ? { ...item, phase: 'preparing' as const, admissions: [...item.admissions, { message: admission.message, contextSnapshotSha256: admission.contextSnapshotSha256, admittedAt: now }] }
       : item),
   }
   return appendRelayState(session, next, current.revision)
 }
 
-/** Pause a running batch that has no admissions yet.
- * Called when the host has nothing to work on; resume happens via admitRelayDirector on a paused batch.
+/** Pause the batch when no director admissions exist yet.
+ * If no item has any admissions and the batch is running, pauses the batch
+ * with reason 'awaiting_director_admission'.
  * @param session Session that owns the batch ledger.
  * @param now ISO timestamp for the ledger update.
- * @returns The updated validated state with mode set to 'paused'.
+ * @returns The updated validated state.
  */
 export function advanceRelayBatch(
   session: Session,
@@ -109,17 +96,17 @@ export function advanceRelayBatch(
 ): RelayState {
   const current = readRelayState(session)
   if (!current || !relayBatchIsOpen(current)) throw new Error('No open relay batch.')
+
   const hasAdmissions = current.items.some(item => item.admissions.length > 0)
-  if (hasAdmissions) throw new Error('Batch has admissions; pause is not applicable.')
+  if (hasAdmissions) throw new Error('Items already have admissions; use admitRelayDirector instead.')
   if (current.mode !== 'running') throw new Error('Cannot pause a non-running batch.')
-  const next: RelayState = {
-    ...current, revision: current.revision + 1, updatedAt: now, mode: 'paused', reason: 'awaiting_director_admission',
-  }
+
+  const next: RelayState = { ...current, revision: current.revision + 1, updatedAt: now, mode: 'paused', reason: 'awaiting_director_admission' }
   return appendRelayState(session, next, current.revision)
 }
 
 /** Complete a batch where all items have terminal evidence.
- * Sets mode to 'completed'. Terminal — cannot be reopened. Releases the Host lease.
+ * Sets mode to 'completed'. Terminal — cannot be reopened.
  * @param session Session that owns the batch ledger.
  * @param now ISO timestamp for the ledger update.
  * @returns The updated validated state.
@@ -133,13 +120,11 @@ export function completeRelayBatch(
   if (!current || !relayBatchIsOpen(current)) throw new Error('No open relay batch.')
   assertAllSettled(current)
   const next: RelayState = { ...current, revision: current.revision + 1, updatedAt: now, mode: 'completed', reason: null }
-  const saved = appendRelayState(session, next, current.revision)
-  releaseHostDirectorBinding(session, current.start.batchId)
-  return saved
+  return appendRelayState(session, next, current.revision)
 }
 
 /** Close a batch that cannot continue (expired, all items abandoned, etc).
- * Sets mode to 'closed'. Terminal — cannot be reopened. Releases the Host lease.
+ * Sets mode to 'closed'. Terminal — cannot be reopened.
  * Non-settled items are abandoned; settled items retain their evidence.
  * @param session Session that owns the batch ledger.
  * @param reason Human-readable close reason stored in the ledger.
@@ -162,9 +147,7 @@ export function closeRelayBatch(
     reason,
     items: current.items.map(item => isSettled(item) ? item : { ...item, phase: 'abandoned' as const, reason }),
   }
-  const saved = appendRelayState(session, next, current.revision)
-  releaseHostDirectorBinding(session, current.start.batchId)
-  return saved
+  return appendRelayState(session, next, current.revision)
 }
 
 /** Cold recovery: re-establish Host lease from durable session state.
@@ -176,32 +159,14 @@ export function closeRelayBatch(
 export function recoverRelayBatch(
   session: Session,
   port: DirectorContextReadPort,
-): { state: RelayState; lease: HostLease } | null {
+): {
+  state: RelayState
+  lease: { enter(scope: DirectorObjectScope, signal?: AbortSignal): Promise<DirectorContextEntryResult>; release(): void }
+} | null {
   const state = readRelayState(session)
   if (!state || !relayBatchIsOpen(state)) return null
   const lease = claimHostDirectorBinding(session, state.start.batchId, port)
   return { state, lease }
-}
-
-/** Operator-gated release of a dead Host lease so its open batch can be recovered.
- * Fail-closed: only an invalidated or already-released owner of this exact batch is released —
- * a healthy lease is never stolen, a foreign lease is never touched, and a missing lease is an error.
- * In-flight operations settle before the owner is dropped, matching the lease's own release semantics.
- * @param session Session that owns the batch ledger.
- * @param batchId Exact open-batch identity; a mismatch leaves every lease untouched.
- * @returns settling: true while the released owner's in-flight operations drain before removal.
- * @throws When the batch is missing, terminal, or mismatched; when no lease exists; or when the lease is healthy.
- */
-export function releaseDeadRelayHostLease(session: Session, batchId: string): { settling: boolean } {
-  const state = readRelayState(session)
-  if (!state || !relayBatchIsOpen(state) || state.start.batchId !== batchId) {
-    throw new Error('No open relay batch with this identity.')
-  }
-  const health = hostDirectorLeaseHealth(session, batchId)
-  if (health === 'operational' || health === 'foreign') throw new Error('A live Host lease cannot be released.')
-  if (health === 'none') throw new Error('No Host lease exists for this batch.')
-  releaseHostDirectorBinding(session, batchId)
-  return { settling: hasHostDirectorOwner(session) }
 }
 
 function assertAllSettled(state: RelayState): void {
@@ -210,4 +175,9 @@ function assertAllSettled(state: RelayState): void {
       throw new Error(`Relay item ${index} is not settled; cannot complete the batch.`)
     }
   }
+}
+
+function isSettled(item: { phase: string; run: { publicStatus: string } | null }): boolean {
+  return (item.phase === 'collected' && item.run?.publicStatus === 'succeeded')
+    || (item.phase === 'failed' && item.run?.publicStatus === 'failed')
 }
