@@ -612,7 +612,8 @@ LOCAL_PROFILE_BUNDLES = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app",
                          "@deepseek-ai/dsh-experimental-qingmu-web"]
 LOCAL_PROFILE_LINKS = ("qingmu-web", "client-ui-brand-qingmu", "qingmu-director-context-bridge",
                        "client-ui-qingmu-cockpit", "qingmu-yimeng-read-adapter",
-                       "qingmu-imago-method-adapter", "qingmu-yimeng-command-adapter")
+                       "qingmu-imago-method-adapter", "qingmu-yimeng-command-adapter",
+                       "qingmu-project-context", "qingmu-creative-skill-catalog")
 
 
 def local_director_profile(root: Path, *, install: bool = False) -> None:
